@@ -1,0 +1,40 @@
+# Minimal config the Worker needs to run (bindings + migrations).
+# Add account_id, routes, and [vars] only when your deployment needs them.
+
+name = "cf-img-gallery"
+main = "src/index.ts"
+compatibility_date = "2026-01-05"
+
+# Optional: omit if `wrangler deploy` already uses your default account (wrangler whoami).
+# account_id = "<your-account-id>"
+
+# Optional: disable if you only serve on a custom domain and do not want a *.workers.dev URL.
+# workers_dev = false
+
+# Optional: only required for a custom hostname (zone). Omit for workers.dev-only testing.
+# routes = [
+#   { pattern = "yourdomain.com/*", zone_id = "<your-zone-id>" },
+# ]
+
+[[r2_buckets]]
+binding = "IMAGES_BUCKET"
+bucket_name = "images-bucket"
+
+[[durable_objects.bindings]]
+name = "IMAGE_INDEX"
+class_name = "ImageIndex"
+
+[[migrations]]
+tag = "001_init"
+new_sqlite_classes = ["ImageIndex"]
+
+# Optional [vars] — the app reads these from env; unset means defaults (see README).
+#
+# ADMIN_PATH — admin URL prefix (default in code: /_admin). Set for a non-default path.
+# ADMIN_PATH = "/your-secret-admin-path"
+#
+# ACCESS_BYPASS_DEV — add ONLY for local `wrangler dev` if you are not going through Access.
+# ACCESS_BYPASS_DEV = "true"
+#
+# R2_PUBLIC_HOST — optional; if set, image resizing uses this host as origin instead of the Worker /media route.
+# R2_PUBLIC_HOST = "pub.example.com"
