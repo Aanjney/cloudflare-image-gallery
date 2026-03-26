@@ -21,11 +21,11 @@ Just wanted to build something to document and showcase my film photography jour
 Design is inspired by this brilliant page: [objective.framer.website/people](https://objective.framer.website/people). I also browsed through dozens of other portfolios, stock image platforms, and galleries to get a sense of what I'd want in my own project. Vibe coded most of the UI with Claude, lol, and spent way too long battling random CSS properties and HTML structure.
 
 
-| Screen         | Preview                                    |
-| -------------- | ------------------------------------------ |
-| Public gallery | `[assets/gallery.png](assets/gallery.png)` |
-| Admin, Upload  | `[assets/upload.png](assets/upload.png)`   |
-| Admin, Manage  | `[assets/manage.png](assets/manage.png)`   |
+| Screen | Preview |
+| ------ | ------- |
+| Gallery | <img src="assets/gallery.png" alt="Public gallery" width="520" /> |
+| Upload | <img src="assets/upload.png" alt="Admin upload" width="520" /> |
+| Manage | <img src="assets/manage.png" alt="Admin manage" width="520" /> |
 
 
 ## Tech stack
