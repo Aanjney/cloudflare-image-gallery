@@ -1,4 +1,4 @@
-# Stills from my film camera
+# Cloudflare-image-gallery
 
 A self-hosted image gallery running entirely on Cloudflare's free tier: Workers, R2, Durable Objects, and Image Resizing.
 Just wanted to build something to document and showcase my film photography journey.
