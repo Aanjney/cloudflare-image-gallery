@@ -3,6 +3,7 @@ import type { Context, Next } from 'hono';
 import { Env, ImageMeta, ListResponse } from './types';
 import { buildGalleryHTML } from './html/gallery';
 import { buildAdminHTML } from './html/admin';
+import { FAVICON_SVG } from './favicon';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -503,6 +504,23 @@ app.post('/_admin/api/upload', async (c) => {
 });
 
 // ─── SEO ───
+
+const faviconHeaders = {
+  'Content-Type': 'image/svg+xml; charset=utf-8',
+  'Cache-Control': 'public, max-age=604800, stale-while-revalidate=86400',
+};
+
+app.get('/favicon.svg', (c) =>
+  addSecurityHeaders(
+    new Response(FAVICON_SVG, { headers: faviconHeaders }),
+  ),
+);
+
+/** Crawlers and older clients request /favicon.ico; redirect to the SVG resource. */
+app.get('/favicon.ico', (c) => {
+  const loc = new URL('/favicon.svg', c.req.url).toString();
+  return addSecurityHeaders(c.redirect(loc, 301));
+});
 
 app.get('/robots.txt', (c) =>
   addSecurityHeaders(

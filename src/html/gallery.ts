@@ -12,10 +12,10 @@ export function buildGalleryHTML(baseUrl: string): string {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Stills from my film camera &mdash; A Project by Aanjney</title>
-<meta name="description" content="A curated collection of film photography. Shot on Portra, Ektar, HP5 and more." />
+<title>Stills from my film camera</title>
+<meta name="description" content="A curated collection of photographs I took with my film camera." />
 <meta name="theme-color" content="#000000" />
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='16' y='6' width='32' height='52' rx='4' fill='%23333' stroke='%23fff' stroke-width='2'/%3E%3Crect x='20' y='2' width='24' height='8' rx='2' fill='%23555' stroke='%23fff' stroke-width='1.5'/%3E%3Ccircle cx='32' cy='34' r='12' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Ccircle cx='32' cy='34' r='5' fill='%23fff'/%3E%3Crect x='22' y='14' width='6' height='4' rx='1' fill='%23888'/%3E%3Crect x='36' y='14' width='6' height='4' rx='1' fill='%23888'/%3E%3Crect x='20' y='50' width='24' height='4' rx='1' fill='%23555'/%3E%3C/svg%3E" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="Stills from my film camera" />
 <meta property="og:description" content="A curated collection of photographs I took with my film camera." />
