@@ -378,7 +378,7 @@ body{
       <h3>Drag negatives here</h3><p>JPG, PNG, WebP</p>
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <input id="filePicker" type="file" accept="image/*" multiple style="display:none" />
+      <input id="filePicker" type="file" accept="image/jpeg,image/png,image/webp" multiple style="display:none" />
     </div>
     <div class="queue-header">
       <h3>Pending Queue (<span id="queueCount">0</span>)</h3>
@@ -585,11 +585,18 @@ body{
     });
   };
 
+  var ALLOWED_UPLOAD_TYPES = ['image/jpeg','image/png','image/webp'];
   var addFiles = function(files){
-    var arr = Array.from(files), valid = [];
+    var arr = Array.from(files), valid = [], rejected = [];
     for (var i=0;i<arr.length;i++){
-      if (!arr[i].type.startsWith('image/')){ uploadStatus.textContent = 'Skipping non-image: '+arr[i].name; continue; }
+      if (ALLOWED_UPLOAD_TYPES.indexOf(arr[i].type) === -1){ rejected.push(arr[i].name); continue; }
       valid.push(arr[i]);
+    }
+    if (rejected.length){
+      uploadProgress.style.display = 'block';
+      uploadLabel.textContent = 'Skipped';
+      uploadStatus.className = 'upload-progress-status error';
+      uploadStatus.textContent = 'Unsupported format (only JPEG, PNG, WebP): ' + rejected.join(', ');
     }
     Promise.all(valid.map(function(f){return getImageMeta(f);})).then(function(metas){
       metas.forEach(function(meta,i){
@@ -636,7 +643,7 @@ body{
 
   var uploadNext = function(){
     var idx = -1;
-    for (var i=0;i<queue.length;i++){ if (queue[i].status==='Queued'||queue[i].status==='Error'){idx=i;break;} }
+    for (var i=0;i<queue.length;i++){ if (queue[i].status==='Queued'){idx=i;break;} }
     if (idx === -1){
       uploadLabel.textContent = uploadErrors ? 'Completed with errors' : 'Complete';
       uploadStatus.className = 'upload-progress-status ' + (uploadErrors ? 'error' : 'done');

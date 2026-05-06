@@ -427,9 +427,20 @@ app.post('/_admin/api/upload', async (c) => {
   const stub = getIndexStub(c.env);
   const uploaded: ImageMeta[] = [];
 
+  const ALLOWED_UPLOAD_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]);
+
   for (const file of files) {
-    if (!file.type || !file.type.startsWith('image/')) {
-      return addSecurityHeaders(c.json({ error: 'Invalid file type' }, 400));
+    if (!file.type || !ALLOWED_UPLOAD_TYPES.has(file.type)) {
+      return addSecurityHeaders(
+        c.json(
+          { error: 'Only JPEG, PNG, or WebP images are allowed' },
+          400,
+        ),
+      );
     }
     const contentType = file.type || 'image/jpeg';
     const ext =
