@@ -1,3 +1,10 @@
+import {
+  CAROUSEL_DEFAULT_VARIANT,
+  CAROUSEL_VARIANTS,
+  GALLERY_GRID_DEFAULT_VARIANT,
+  GALLERY_GRID_VARIANTS,
+} from '../imageVariants';
+
 export function buildGalleryHTML(baseUrl: string): string {
   const structuredData = JSON.stringify({
     '@context': 'https://schema.org',
@@ -6,6 +13,10 @@ export function buildGalleryHTML(baseUrl: string): string {
     description: 'A curated collection of photographs I took with my film camera.',
     url: baseUrl,
   });
+  const gridDefaultVariant = JSON.stringify(GALLERY_GRID_DEFAULT_VARIANT);
+  const gridVariants = JSON.stringify(GALLERY_GRID_VARIANTS);
+  const carouselDefaultVariant = JSON.stringify(CAROUSEL_DEFAULT_VARIANT);
+  const carouselVariants = JSON.stringify(CAROUSEL_VARIANTS);
 
   return `<!doctype html>
 <html lang="en" data-theme="dark">
@@ -335,6 +346,10 @@ body{
   var currentIndex = -1;
   var touchStartX = 0;
   var touchStartY = 0;
+  var GRID_DEFAULT_VARIANT = ${gridDefaultVariant};
+  var GRID_VARIANTS = ${gridVariants};
+  var CAROUSEL_DEFAULT_VARIANT = ${carouselDefaultVariant};
+  var CAROUSEL_VARIANTS = ${carouselVariants};
 
   var esc = function(s) {
     return String(s)
@@ -342,6 +357,15 @@ body{
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  };
+
+  var imageUrl = function(id, variant) {
+    return '/img/' + id + '?w=' + variant.width + '&q=' + variant.quality + '&fmt=' + variant.format;
+  };
+  var imageSrcset = function(id, variants) {
+    return variants.map(function(variant) {
+      return imageUrl(id, variant) + ' ' + variant.width + 'w';
+    }).join(', ');
   };
 
   var renderItems = function(items) {
@@ -370,16 +394,8 @@ body{
       img.loading = isAboveFold ? 'eager' : 'lazy';
       img.decoding = 'async';
       img.alt = item.name || item.alt || 'Film photograph';
-      img.src = '/img/' + item.id + '?w=960&q=80&fmt=auto';
-      img.srcset = [
-        '/img/' + item.id + '?w=240&q=75&fmt=auto 240w',
-        '/img/' + item.id + '?w=320&q=78&fmt=auto 320w',
-        '/img/' + item.id + '?w=480&q=78&fmt=auto 480w',
-        '/img/' + item.id + '?w=720&q=80&fmt=auto 720w',
-        '/img/' + item.id + '?w=960&q=80&fmt=auto 960w',
-        '/img/' + item.id + '?w=1200&q=80&fmt=auto 1200w',
-        '/img/' + item.id + '?w=1600&q=82&fmt=auto 1600w'
-      ].join(', ');
+      img.src = imageUrl(item.id, GRID_DEFAULT_VARIANT);
+      img.srcset = imageSrcset(item.id, GRID_VARIANTS);
       img.sizes = '(max-width:420px) 96vw,(max-width:640px) 88vw,(max-width:900px) 50vw,(max-width:1200px) 36vw,28vw';
       if (isAboveFold) {
         img.fetchPriority = 'high';
@@ -440,17 +456,13 @@ body{
 
   /* ── Carousel ── */
   var imgCache = {};
-  var carouselUrl = function(id) { return '/img/' + id + '?w=1600&q=85&fmt=auto'; };
+  var carouselUrl = function(id) { return imageUrl(id, CAROUSEL_DEFAULT_VARIANT); };
 
   var preloadImage = function(id) {
     if (imgCache[id]) return imgCache[id];
     var img = new Image();
     img.src = carouselUrl(id);
-    img.srcset = [
-      '/img/' + id + '?w=800&q=85&fmt=auto 800w',
-      '/img/' + id + '?w=1200&q=85&fmt=auto 1200w',
-      '/img/' + id + '?w=1600&q=85&fmt=auto 1600w'
-    ].join(', ');
+    img.srcset = imageSrcset(id, CAROUSEL_VARIANTS);
     img.sizes = '90vw';
     imgCache[id] = img;
     return img;
