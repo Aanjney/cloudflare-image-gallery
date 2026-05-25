@@ -36,10 +36,7 @@ class FakeImagesBucket {
   }
 }
 
-const createEnv = (
-  stubFetch?: StubFetch,
-  overrides: Partial<Env> = {},
-) => {
+const createEnv = (stubFetch?: StubFetch, overrides: Partial<Env> = {}) => {
   const bucket = new FakeImagesBucket();
   const env = {
     IMAGES_BUCKET: bucket as unknown as R2Bucket,

@@ -25,7 +25,9 @@ const createStub = () => {
 
 const req = (url: string, init?: RequestInit) => new Request(url, init);
 
-const meta = (partial: Partial<ImageMeta> & Pick<ImageMeta, 'id' | 'key' | 'createdAt'>): ImageMeta => ({
+const meta = (
+  partial: Partial<ImageMeta> & Pick<ImageMeta, 'id' | 'key' | 'createdAt'>,
+): ImageMeta => ({
   size: 100,
   contentType: 'image/jpeg',
   ...partial,
@@ -74,9 +76,7 @@ describe('ImageIndex Durable Object', () => {
       await inst.fetch(
         req('https://index/add', {
           method: 'POST',
-          body: JSON.stringify(
-            meta({ id: 'a', key: 'k1-v2', createdAt: '2024-01-03T00:00:00Z' }),
-          ),
+          body: JSON.stringify(meta({ id: 'a', key: 'k1-v2', createdAt: '2024-01-03T00:00:00Z' })),
         }),
       );
 
@@ -87,9 +87,7 @@ describe('ImageIndex Durable Object', () => {
     });
 
     it('returns 400 for invalid JSON', async () => {
-      const r = await inst.fetch(
-        req('https://index/add', { method: 'POST', body: 'not-json{' }),
-      );
+      const r = await inst.fetch(req('https://index/add', { method: 'POST', body: 'not-json{' }));
       expect(r.status).toBe(400);
       expect(await r.text()).toBe('Invalid JSON');
     });
@@ -180,9 +178,7 @@ describe('ImageIndex Durable Object', () => {
           body: JSON.stringify(meta({ id: 'only', key: 'k', createdAt: '2024-01-01T00:00:00Z' })),
         }),
       );
-      const r = await inst.fetch(
-        req(`https://index/list?cursor=${encodeURIComponent('@@@')}`),
-      );
+      const r = await inst.fetch(req(`https://index/list?cursor=${encodeURIComponent('@@@')}`));
       const data = (await r.json()) as ListResponse;
       expect(data.items).toHaveLength(1);
       expect(data.items[0].id).toBe('only');
@@ -293,9 +289,7 @@ describe('ImageIndex Durable Object', () => {
 
     it('returns 400 for invalid JSON', async () => {
       const { inst } = createStub();
-      const r = await inst.fetch(
-        req('https://index/update', { method: 'POST', body: '{' }),
-      );
+      const r = await inst.fetch(req('https://index/update', { method: 'POST', body: '{' }));
       expect(r.status).toBe(400);
     });
   });

@@ -1,5 +1,6 @@
 import { FAVICON_SVG } from '../favicon';
-import { addSecurityHeaders, getIndexStub, type GalleryApp } from '../http';
+import { addSecurityHeaders } from '../app/security';
+import { getIndexStub, type GalleryApp } from '../app/worker';
 import type { ImageMeta, ListResponse } from '../types';
 
 const faviconHeaders = {
@@ -7,11 +8,9 @@ const faviconHeaders = {
   'Cache-Control': 'public, max-age=604800, stale-while-revalidate=86400',
 };
 
-export const registerSeoRoutes = (app: GalleryApp) => {
+export const registerSiteMetaRoutes = (app: GalleryApp) => {
   app.get('/favicon.svg', (c) =>
-    addSecurityHeaders(
-      new Response(FAVICON_SVG, { headers: faviconHeaders }),
-    ),
+    addSecurityHeaders(new Response(FAVICON_SVG, { headers: faviconHeaders })),
   );
 
   app.get('/favicon.ico', (c) => {

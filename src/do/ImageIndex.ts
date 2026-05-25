@@ -69,14 +69,10 @@ export class ImageIndex {
       year: payload.year,
     };
 
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ??
-      []) as string[];
+    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
 
     // Prepend newest first.
-    const newOrder = [meta.id, ...order.filter((i) => i !== meta.id)].slice(
-      0,
-      ORDER_LIMIT,
-    );
+    const newOrder = [meta.id, ...order.filter((i) => i !== meta.id)].slice(0, ORDER_LIMIT);
 
     await Promise.all([
       this.state.storage.put(`${META_PREFIX}${meta.id}`, meta),
@@ -91,18 +87,13 @@ export class ImageIndex {
     const cursorParam = url.searchParams.get('cursor');
     const q = url.searchParams.get('q')?.toLowerCase().trim() || '';
 
-    const limit = Math.min(
-      500,
-      Math.max(1, limitParam ? Number(limitParam) || 20 : 20),
-    );
+    const limit = Math.min(500, Math.max(1, limitParam ? Number(limitParam) || 20 : 20));
 
     let offset = 0;
     if (cursorParam) {
       try {
         const decoded = JSON.parse(
-          new TextDecoder().decode(
-            Uint8Array.from(atob(cursorParam), (c) => c.charCodeAt(0)),
-          ),
+          new TextDecoder().decode(Uint8Array.from(atob(cursorParam), (c) => c.charCodeAt(0))),
         );
         if (typeof decoded.offset === 'number') {
           offset = decoded.offset;
@@ -112,8 +103,7 @@ export class ImageIndex {
       }
     }
 
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ??
-      []) as string[];
+    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
 
     const filtered: string[] = [];
     if (q) {
@@ -143,9 +133,7 @@ export class ImageIndex {
     const items = metas.filter((m): m is ImageMeta => Boolean(m));
     const nextOffset = offset + slice.length;
     const nextCursor =
-      nextOffset < source.length
-        ? btoa(JSON.stringify({ offset: nextOffset }))
-        : null;
+      nextOffset < source.length ? btoa(JSON.stringify({ offset: nextOffset })) : null;
 
     const body: ListResponse = { items, cursor: nextCursor };
     return Response.json(body);
@@ -200,8 +188,7 @@ export class ImageIndex {
     const meta = await this.state.storage.get<ImageMeta>(metaKey);
     if (!meta) return new Response('Not found', { status: 404 });
 
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ??
-      []) as string[];
+    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
     const newOrder = order.filter((i) => i !== payload.id);
 
     await Promise.all([
@@ -212,4 +199,3 @@ export class ImageIndex {
     return Response.json({ ok: true, removed: payload.id });
   }
 }
-

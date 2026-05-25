@@ -9,7 +9,7 @@ import {
   imagePath,
   purgeImageCacheTargets,
   purgeImagePaths,
-} from '../src/imageVariants';
+} from '../src/domain/imageVariants';
 
 describe('image variant registry', () => {
   it('builds stable image URLs from one canonical variant shape', () => {

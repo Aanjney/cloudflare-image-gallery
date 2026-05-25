@@ -27,4 +27,3 @@ export type ListResponse = {
   items: ImageMeta[];
   cursor?: string | null;
 };
-

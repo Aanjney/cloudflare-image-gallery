@@ -1,12 +1,11 @@
 import { buildGalleryHTML } from '../html/gallery';
-import { addSecurityHeaders, getIndexStub, type GalleryApp } from '../http';
+import { addSecurityHeaders } from '../app/security';
+import { getIndexStub, type GalleryApp } from '../app/worker';
 import type { ListResponse } from '../types';
 
-export const registerPublicRoutes = (app: GalleryApp) => {
+export const registerGalleryRoutes = (app: GalleryApp) => {
   app.get('/api/health', (c) =>
-    addSecurityHeaders(
-      c.json({ ok: true, now: new Date().toISOString() }),
-    ),
+    addSecurityHeaders(c.json({ ok: true, now: new Date().toISOString() })),
   );
 
   app.get('/api/images', async (c) => {

@@ -1,18 +1,18 @@
 import { Hono } from 'hono';
-import { registerAdminRewrite } from './http';
+import { registerAdminRewrite } from './app/adminPath';
 import { registerAdminRoutes } from './routes/admin';
+import { registerGalleryRoutes } from './routes/gallery';
 import { registerMediaRoutes } from './routes/media';
-import { registerPublicRoutes } from './routes/public';
-import { registerSeoRoutes } from './routes/seo';
+import { registerSiteMetaRoutes } from './routes/siteMeta';
 import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
 
 registerAdminRewrite(app);
-registerPublicRoutes(app);
+registerGalleryRoutes(app);
 registerMediaRoutes(app);
 registerAdminRoutes(app);
-registerSeoRoutes(app);
+registerSiteMetaRoutes(app);
 
 export default app;
 export { ImageIndex } from './do/ImageIndex';

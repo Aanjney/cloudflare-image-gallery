@@ -1,6 +1,6 @@
-import { buildAdminBody } from './admin/markup';
-import { buildAdminScript } from './admin/script';
-import { buildAdminStyles } from './admin/styles';
+import { buildAdminBody } from './markup';
+import { buildAdminScript } from './script';
+import { buildAdminStyles } from './styles';
 
 export function buildAdminHTML(adminPrefix = '/_admin'): string {
   return `<!doctype html>

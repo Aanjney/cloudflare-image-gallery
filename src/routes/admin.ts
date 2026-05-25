@@ -1,24 +1,11 @@
 import { buildAdminHTML } from '../html/admin';
-import {
-  addSecurityHeaders,
-  getAdminPrefix,
-  getEdgeCache,
-  getIndexStub,
-  requireAdminAuth,
-  type GalleryApp,
-} from '../http';
-import {
-  UPLOAD_WARM_VARIANTS,
-  imagePath,
-  purgeImageCacheTargets,
-} from '../imageVariants';
+import { getAdminPrefix } from '../app/adminPath';
+import { getEdgeCache } from '../app/cache';
+import { addSecurityHeaders, requireAdminAuth } from '../app/security';
+import { getIndexStub, type GalleryApp } from '../app/worker';
+import { UPLOAD_WARM_VARIANTS, imagePath, purgeImageCacheTargets } from '../domain/imageVariants';
+import { ALLOWED_UPLOAD_TYPE_SET } from '../domain/uploadPolicy';
 import type { ImageMeta } from '../types';
-
-const ALLOWED_UPLOAD_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-]);
 
 export const registerAdminRoutes = (app: GalleryApp) => {
   app.use('/_admin/*', async (c, next) => {
@@ -41,9 +28,7 @@ export const registerAdminRoutes = (app: GalleryApp) => {
 
   app.use('/_admin/*', requireAdminAuth);
 
-  app.get('/_admin/ping', (c) =>
-    c.json({ ok: true, admin: true, now: new Date().toISOString() }),
-  );
+  app.get('/_admin/ping', (c) => c.json({ ok: true, admin: true, now: new Date().toISOString() }));
 
   app.post('/_admin/api/images/delete', async (c) => {
     const parsed = (await c.req.json().catch(() => ({}))) as { id?: string };
@@ -57,11 +42,7 @@ export const registerAdminRoutes = (app: GalleryApp) => {
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
     if (!metaResp.ok)
       return addSecurityHeaders(
-        c.json(
-          { error: 'Not found' },
-          404,
-          { 'Cache-Control': 'private, no-store' },
-        ),
+        c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' }),
       );
     const meta = (await metaResp.json()) as ImageMeta;
 
@@ -107,15 +88,11 @@ export const registerAdminRoutes = (app: GalleryApp) => {
     return addSecurityHeaders(c.json({ ok: true, image: updated }));
   });
 
-  app.get('/_admin/', (c) =>
-    addSecurityHeaders(c.html(buildAdminHTML(getAdminPrefix(c.env)))),
-  );
+  app.get('/_admin/', (c) => addSecurityHeaders(c.html(buildAdminHTML(getAdminPrefix(c.env)))));
 
   app.post('/_admin/api/upload', async (c) => {
     const formData = await c.req.formData();
-    const files = formData
-      .getAll('file')
-      .filter((f): f is File => f instanceof File);
+    const files = formData.getAll('file').filter((f): f is File => f instanceof File);
 
     if (!files.length) {
       return c.json({ error: 'file field (File) is required' }, 400);
@@ -123,9 +100,7 @@ export const registerAdminRoutes = (app: GalleryApp) => {
 
     const alt = formData.get('alt')?.toString().trim() || undefined;
     const width = formData.get('width') ? Number(formData.get('width')) : undefined;
-    const height = formData.get('height')
-      ? Number(formData.get('height'))
-      : undefined;
+    const height = formData.get('height') ? Number(formData.get('height')) : undefined;
     const name = formData.get('name')?.toString().trim() || undefined;
     const placeholder = formData.get('placeholder')?.toString().trim() || undefined;
     const cameraBody = formData.get('cameraBody')?.toString().trim() || undefined;
@@ -137,21 +112,14 @@ export const registerAdminRoutes = (app: GalleryApp) => {
     const uploaded: ImageMeta[] = [];
 
     for (const file of files) {
-      if (!file.type || !ALLOWED_UPLOAD_TYPES.has(file.type)) {
+      if (!file.type || !ALLOWED_UPLOAD_TYPE_SET.has(file.type)) {
         return addSecurityHeaders(
-          c.json(
-            { error: 'Only JPEG, PNG, or WebP images are allowed' },
-            400,
-          ),
+          c.json({ error: 'Only JPEG, PNG, or WebP images are allowed' }, 400),
         );
       }
       const contentType = file.type || 'image/jpeg';
       const ext =
-        contentType === 'image/png'
-          ? 'png'
-          : contentType === 'image/webp'
-            ? 'webp'
-            : 'jpg';
+        contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg';
 
       const id = crypto.randomUUID();
       const key = `images/${id}.${ext}`;
@@ -186,10 +154,7 @@ export const registerAdminRoutes = (app: GalleryApp) => {
       if (!doResp.ok) {
         const message = await doResp.text();
         await c.env.IMAGES_BUCKET.delete(key).catch(() => {});
-        return c.json(
-          { error: 'Failed to record metadata', detail: message },
-          500,
-        );
+        return c.json({ error: 'Failed to record metadata', detail: message }, 500);
       }
 
       const saved = (await doResp.json()) as ImageMeta;

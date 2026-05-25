@@ -1,3 +1,5 @@
+import { UPLOAD_ACCEPT_ATTRIBUTE } from '../../domain/uploadPolicy';
+
 export function buildAdminBody(): string {
   return `<button class="mobile-toggle" type="button" aria-label="Toggle sidebar" id="mobileToggle">
   <span class="material-symbols-outlined">menu</span>
@@ -38,7 +40,7 @@ export function buildAdminBody(): string {
       <h3>Drag negatives here</h3><p>JPG, PNG, WebP</p>
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
-      <input id="filePicker" type="file" accept="image/jpeg,image/png,image/webp" multiple style="display:none" />
+      <input id="filePicker" type="file" accept="${UPLOAD_ACCEPT_ATTRIBUTE}" multiple style="display:none" />
     </div>
     <div class="queue-header">
       <h3>Pending Queue (<span id="queueCount">0</span>)</h3>

@@ -1,10 +1,6 @@
-import {
-  addSecurityHeaders,
-  buildCacheKey,
-  getEdgeCache,
-  getIndexStub,
-  type GalleryApp,
-} from '../http';
+import { buildCacheKey, getEdgeCache } from '../app/cache';
+import { addSecurityHeaders } from '../app/security';
+import { getIndexStub, type GalleryApp } from '../app/worker';
 import type { Env, ImageMeta } from '../types';
 
 const buildImageOrigin = (env: Env, key: string) => {
@@ -25,21 +21,13 @@ export const registerMediaRoutes = (app: GalleryApp) => {
     const stub = getIndexStub(c.env);
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
     if (!metaResp.ok) {
-      return c.json(
-        { error: 'Not found' },
-        404,
-        { 'Cache-Control': 'private, no-store' },
-      );
+      return c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' });
     }
     const meta = (await metaResp.json()) as ImageMeta;
     const obj = await c.env.IMAGES_BUCKET.get(meta.key);
     if (!obj || !obj.body) {
       return addSecurityHeaders(
-        c.json(
-          { error: 'Not found' },
-          404,
-          { 'Cache-Control': 'private, no-store' },
-        ),
+        c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' }),
       );
     }
 
@@ -57,7 +45,10 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     const headers = new Headers();
     headers.set('Content-Type', meta.contentType || 'image/jpeg');
-    headers.set('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable');
+    headers.set(
+      'Cache-Control',
+      'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
+    );
     headers.set('Vary', 'Accept');
     if (etag) headers.set('ETag', etag);
     if (typeof obj.size === 'number') headers.set('Content-Length', String(obj.size));
@@ -83,16 +74,10 @@ export const registerMediaRoutes = (app: GalleryApp) => {
     const stub = getIndexStub(c.env);
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
     if (!metaResp.ok)
-      return c.json(
-        { error: 'Not found' },
-        404,
-        { 'Cache-Control': 'private, no-store' },
-      );
+      return c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' });
     const meta = (await metaResp.json()) as ImageMeta;
 
-    const origin =
-      buildImageOrigin(c.env, meta.key) ||
-      `${new URL(c.req.url).origin}/media/${id}`;
+    const origin = buildImageOrigin(c.env, meta.key) || `${new URL(c.req.url).origin}/media/${id}`;
 
     const imageOpts: Record<string, unknown> = {};
     const requested = width ? Number(width) || undefined : undefined;
@@ -111,7 +96,8 @@ export const registerMediaRoutes = (app: GalleryApp) => {
         status: 304,
         headers: {
           ETag: etag,
-          'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
+          'Cache-Control':
+            'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
           Vary: 'Accept',
         },
       });
@@ -130,15 +116,14 @@ export const registerMediaRoutes = (app: GalleryApp) => {
       const obj = await c.env.IMAGES_BUCKET.get(meta.key);
       if (!obj?.body)
         return addSecurityHeaders(
-          c.json(
-            { error: 'Not found' },
-            404,
-            { 'Cache-Control': 'private, no-store' },
-          ),
+          c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' }),
         );
       const hdrs = new Headers();
       hdrs.set('Content-Type', meta.contentType || 'image/jpeg');
-      hdrs.set('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable');
+      hdrs.set(
+        'Cache-Control',
+        'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
+      );
       hdrs.set('Vary', 'Accept');
       const rawEtag = obj.httpEtag || obj.etag || `"${meta.id}-${meta.size}"`;
       if (rawEtag) hdrs.set('ETag', rawEtag);
@@ -150,7 +135,10 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     const headers = new Headers(resp.headers);
     if (etag) headers.set('ETag', etag);
-    headers.set('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable');
+    headers.set(
+      'Cache-Control',
+      'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
+    );
     headers.set('Vary', 'Accept');
     const final = addSecurityHeaders(new Response(resp.body, { headers, status: resp.status }));
     c.executionCtx?.waitUntil(cache.put(edgeKey, final.clone()));
