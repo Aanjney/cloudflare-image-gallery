@@ -8,8 +8,8 @@ compatibility_date = "2026-01-05"
 # Optional: omit if `wrangler deploy` already uses your default account (wrangler whoami).
 # account_id = "<your-account-id>"
 
-# Optional: disable if you only serve on a custom domain and do not want a *.workers.dev URL.
-# workers_dev = false
+# Disable workers.dev when serving through custom production routes.
+workers_dev = false
 
 # Optional: only required for a custom hostname (zone). Omit for workers.dev-only testing.
 # routes = [
