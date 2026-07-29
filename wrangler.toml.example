@@ -36,7 +36,10 @@ new_sqlite_classes = ["ImageIndex"]
 # ACCESS_BYPASS_DEV — add ONLY for local `wrangler dev` if you are not going through Access.
 # ACCESS_BYPASS_DEV = "true"
 #
-# ACCESS_TEAM_DOMAIN — Cloudflare Access team (short name or full issuer URL). Required in production.
+# ACCESS_TEAM_DOMAIN — Cloudflare Access team. Any of these work:
+#   "your-team"
+#   "your-team.cloudflareaccess.com"
+#   "https://your-team.cloudflareaccess.com"
 # ACCESS_TEAM_DOMAIN = "your-team"
 #
 # ACCESS_AUD — optional Access application AUD tag; when set, JWT audience is checked.

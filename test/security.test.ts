@@ -110,6 +110,19 @@ describe('verifyAccessJwt', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts hostname-only team domain without double suffixing', async () => {
+    const token = await signJwt(validPayload());
+    const fetchFn = mockJwksFetch();
+
+    const result = await verifyAccessJwt(
+      token,
+      { teamDomain: 'test-team.cloudflareaccess.com', audience: AUD },
+      fetchFn as typeof fetch,
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
   it('rejects missing or malformed JWTs', async () => {
     const fetchFn = mockJwksFetch();
 

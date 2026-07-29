@@ -17,6 +17,8 @@ export type AccessJwtVerifyResult =
 export const normalizeAccessIssuer = (teamDomain: string): string => {
   const trimmed = teamDomain.trim().replace(/\/$/, '');
   if (trimmed.startsWith('https://')) return trimmed;
+  if (trimmed.startsWith('http://')) return `https://${trimmed.slice('http://'.length)}`;
+  if (trimmed.endsWith('.cloudflareaccess.com')) return `https://${trimmed}`;
   return `https://${trimmed}.cloudflareaccess.com`;
 };
 
