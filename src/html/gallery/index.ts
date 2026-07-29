@@ -1,5 +1,5 @@
 import { buildGalleryBody } from './markup';
-import { buildGalleryScript } from './script';
+import { buildGalleryScript } from '../../client/gallery';
 import { buildGalleryStyles } from './styles';
 
 export function buildGalleryHTML(baseUrl: string): string {

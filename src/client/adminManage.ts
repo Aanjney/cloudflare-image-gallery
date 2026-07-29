@@ -21,16 +21,11 @@ export function buildAdminManageScript(): string {
   };
 
   var renderManage = function(){
-    var term = (searchInput.value||'').toLowerCase();
     manageBody.innerHTML = '';
     if (pageInfo){ pageInfo.textContent = 'Page ' + (prevStack.length+1) + (nextCursor ? ' \\u2192' : ''); }
-    var filtered = manageItems.filter(function(item){
-      var hay = (item.name||'')+' '+(item.alt||'')+' '+(item.location||'')+' '+(item.filmStock||'')+' '+(item.cameraBody||'')+' '+item.id;
-      return hay.toLowerCase().indexOf(term) !== -1;
-    });
-    manageEmpty.style.display = filtered.length ? 'none' : 'block';
+    manageEmpty.style.display = manageItems.length ? 'none' : 'block';
 
-    filtered.forEach(function(item){
+    manageItems.forEach(function(item){
       var tr = document.createElement('tr');
 
       /* Thumb */
@@ -204,21 +199,17 @@ export function buildAdminManageScript(): string {
     });
   };
 
-  var updateStats = function(items){
-    if (!items.length) return;
-    qs('statTotal').textContent = String(items.length);
-    var totalBytes = items.reduce(function(s,i){return s+(i.size||0);},0);
-    qs('statStorage').textContent = (totalBytes/(1024*1024)).toFixed(1)+' MB';
-    var dates = items.filter(function(i){return i.createdAt;}).map(function(i){return new Date(i.createdAt);});
-    if (dates.length) qs('statLatest').textContent = fmtDate(new Date(Math.max.apply(null,dates)).toISOString());
-    qs('statAvgSize').textContent = items.length ? Math.round(totalBytes/items.length/1024)+' KB' : '\\u2014';
-  };
-
   var statsLoaded = false;
   var loadBucketStats = function(){
     if (statsLoaded) return;
     statsLoaded = true;
-    loadAllManage().then(function(all){ updateStats(all); });
+    fetch(ADMIN + '/api/stats').then(function(r){ return r.json(); }).then(function(s){
+      if (!s || typeof s.total !== 'number') return;
+      qs('statTotal').textContent = String(s.total);
+      qs('statStorage').textContent = (s.totalBytes / (1024 * 1024)).toFixed(1) + ' MB';
+      if (s.latestCreatedAt) qs('statLatest').textContent = fmtDate(s.latestCreatedAt);
+      qs('statAvgSize').textContent = s.total ? Math.round(s.avgSize / 1024) + ' KB' : '\\u2014';
+    }).catch(function(){});
   };
 
   var loadManagePage = function(cursorParam){
@@ -242,7 +233,7 @@ export function buildAdminManageScript(): string {
   var searchTimer=null;
   searchInput.addEventListener('input',function(){
     if(searchTimer)clearTimeout(searchTimer);
-    searchTimer=setTimeout(function(){ renderManage(); prevStack.length=0; loadManagePage(null); },200);
+    searchTimer=setTimeout(function(){ prevStack.length=0; loadManagePage(null); },200);
   });
   prevPageBtn.addEventListener('click',function(){ if(!prevStack.length)return; loadManagePage(prevStack.pop()||null); });
   nextPageBtn.addEventListener('click',function(){ if(!nextCursor)return; prevStack.push(currentCursor); loadManagePage(nextCursor); });
@@ -264,8 +255,7 @@ export function buildAdminManageScript(): string {
         fetch(imageUrl(all[i].id, ADMIN_BACKFILL_VARIANT)).then(function(r){return r.blob();}).then(function(blob){
           var url=URL.createObjectURL(blob),img=new Image();
           img.onload=function(){
-            var color='#0e0e0e';
-            try{var c=document.createElement('canvas'),ctx=c.getContext('2d'),s=12;c.width=s;c.height=s;ctx.drawImage(img,0,0,s,s);var d=ctx.getImageData(0,0,s,s).data;var r2=0,g=0,b=0,t=s*s;for(var j=0;j<d.length;j+=4){r2+=d[j];g+=d[j+1];b+=d[j+2];}color='rgb('+Math.round(r2/t)+','+Math.round(g/t)+','+Math.round(b/t)+')';}catch(_){}
+            var color=placeholderFromImage(img);
             URL.revokeObjectURL(url);
             fetch(ADMIN+'/api/images/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:all[i].id,placeholder:color})})
               .then(function(r){if(r.ok)updated++;processed++;manageError.textContent='Processed '+processed+'/'+all.length;next(i+1);})

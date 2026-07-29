@@ -1,5 +1,5 @@
 import { buildAdminBody } from './markup';
-import { buildAdminScript } from './script';
+import { buildAdminScript } from '../../client/admin';
 import { buildAdminStyles } from './styles';
 
 export function buildAdminHTML(adminPrefix = '/_admin'): string {

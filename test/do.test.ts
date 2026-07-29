@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ImageIndex } from '../src/do/ImageIndex';
+import { ImageIndex, ORDER_LIMIT } from '../src/do/ImageIndex';
 import type { Env, ImageMeta, ListResponse } from '../src/types';
 
 class FakeStorage {
@@ -127,6 +127,103 @@ describe('ImageIndex Durable Object', () => {
       expect(m.year).toBe('2024');
       expect(m.cameraBody).toBe('M6');
       expect(m.filmStock).toBe('PORTRA');
+    });
+
+    it('returns 409 when index is at capacity', async () => {
+      const { inst, storage } = createStub();
+      const ids = Array.from({ length: ORDER_LIMIT }, (_, i) => `id-${i}`);
+      await storage.put('order', ids);
+
+      const r = await inst.fetch(
+        req('https://index/add', {
+          method: 'POST',
+          body: JSON.stringify(
+            meta({ id: 'new-id', key: 'k-new', createdAt: '2024-01-01T00:00:00Z' }),
+          ),
+        }),
+      );
+      expect(r.status).toBe(409);
+      expect(await r.text()).toBe('Index at capacity');
+    });
+
+    it('allows re-adding an existing id when at capacity', async () => {
+      const { inst, storage } = createStub();
+      const ids = ['existing', ...Array.from({ length: ORDER_LIMIT - 1 }, (_, i) => `id-${i}`)];
+      await storage.put('order', ids);
+      await storage.put(
+        'meta:existing',
+        meta({ id: 'existing', key: 'old-key', createdAt: '2024-01-01T00:00:00Z' }),
+      );
+
+      const r = await inst.fetch(
+        req('https://index/add', {
+          method: 'POST',
+          body: JSON.stringify(
+            meta({ id: 'existing', key: 'new-key', createdAt: '2024-01-02T00:00:00Z' }),
+          ),
+        }),
+      );
+      expect(r.status).toBe(200);
+      const updated = (await r.json()) as ImageMeta;
+      expect(updated.key).toBe('new-key');
+
+      const order = (await storage.get<string[]>('order')) ?? [];
+      expect(order).toHaveLength(ORDER_LIMIT);
+      expect(order[0]).toBe('existing');
+    });
+  });
+
+  describe('GET /stats', () => {
+    it('returns aggregate counts and sizes', async () => {
+      const { inst } = createStub();
+      await inst.fetch(
+        req('https://index/add', {
+          method: 'POST',
+          body: JSON.stringify(
+            meta({
+              id: 'a',
+              key: 'k1',
+              createdAt: '2024-01-01T00:00:00Z',
+              size: 1000,
+            }),
+          ),
+        }),
+      );
+      await inst.fetch(
+        req('https://index/add', {
+          method: 'POST',
+          body: JSON.stringify(
+            meta({
+              id: 'b',
+              key: 'k2',
+              createdAt: '2024-01-02T00:00:00Z',
+              size: 3000,
+            }),
+          ),
+        }),
+      );
+
+      const r = await inst.fetch(req('https://index/stats'));
+      expect(r.ok).toBe(true);
+      const s = (await r.json()) as {
+        total: number;
+        totalBytes: number;
+        latestCreatedAt: string | null;
+        avgSize: number;
+      };
+      expect(s.total).toBe(2);
+      expect(s.totalBytes).toBe(4000);
+      expect(s.latestCreatedAt).toBe('2024-01-02T00:00:00Z');
+      expect(s.avgSize).toBe(2000);
+    });
+
+    it('returns zeros when empty', async () => {
+      const { inst } = createStub();
+      const r = await inst.fetch(req('https://index/stats'));
+      const s = (await r.json()) as { total: number; totalBytes: number; avgSize: number };
+      expect(s.total).toBe(0);
+      expect(s.totalBytes).toBe(0);
+      expect(s.avgSize).toBe(0);
     });
   });
 

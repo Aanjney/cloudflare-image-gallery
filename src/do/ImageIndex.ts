@@ -1,10 +1,11 @@
-import { Env, ImageMeta, ListResponse } from '../types';
+import { Env, ImageMeta, ListResponse, StatsResponse } from '../types';
 
 type AddPayload = ImageMeta;
 
 const ORDER_KEY = 'order';
 const META_PREFIX = 'meta:';
-const ORDER_LIMIT = 5000;
+export const ORDER_LIMIT = 5000;
+const META_READ_BATCH = 128;
 
 export class ImageIndex {
   private readonly state: DurableObjectState;
@@ -25,6 +26,10 @@ export class ImageIndex {
 
     if (request.method === 'GET' && url.pathname === '/list') {
       return this.handleList(url);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/stats') {
+      return this.handleStats();
     }
 
     if (request.method === 'GET' && url.pathname.startsWith('/meta/')) {
@@ -70,9 +75,12 @@ export class ImageIndex {
     };
 
     const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const isExisting = order.includes(meta.id);
+    if (!isExisting && order.length >= ORDER_LIMIT) {
+      return new Response('Index at capacity', { status: 409 });
+    }
 
-    // Prepend newest first.
-    const newOrder = [meta.id, ...order.filter((i) => i !== meta.id)].slice(0, ORDER_LIMIT);
+    const newOrder = [meta.id, ...order.filter((i) => i !== meta.id)];
 
     await Promise.all([
       this.state.storage.put(`${META_PREFIX}${meta.id}`, meta),
@@ -80,6 +88,32 @@ export class ImageIndex {
     ]);
 
     return Response.json(meta);
+  }
+
+  private async handleStats() {
+    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const metaById = await this.getMetaById(order);
+    let total = 0;
+    let totalBytes = 0;
+    let latestCreatedAt: string | null = null;
+
+    for (const id of order) {
+      const m = metaById.get(id);
+      if (!m) continue;
+      total += 1;
+      totalBytes += m.size ?? 0;
+      if (m.createdAt && (!latestCreatedAt || m.createdAt > latestCreatedAt)) {
+        latestCreatedAt = m.createdAt;
+      }
+    }
+
+    const body: StatsResponse = {
+      total,
+      totalBytes,
+      latestCreatedAt,
+      avgSize: total ? Math.round(totalBytes / total) : 0,
+    };
+    return Response.json(body);
   }
 
   private async handleList(url: URL) {
@@ -105,35 +139,27 @@ export class ImageIndex {
 
     const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
 
-    const filtered: string[] = [];
+    let listSource = order;
+    let metaById: Map<string, ImageMeta> | null = null;
+
     if (q) {
-      for (const id of order) {
-        const m = await this.state.storage.get<ImageMeta>(`${META_PREFIX}${id}`);
-        if (
-          m &&
-          ((m.alt && m.alt.toLowerCase().includes(q)) ||
-            (m.name && m.name.toLowerCase().includes(q)) ||
-            (m.location && m.location.toLowerCase().includes(q)) ||
-            (m.cameraBody && m.cameraBody.toLowerCase().includes(q)) ||
-            (m.filmStock && m.filmStock.toLowerCase().includes(q)) ||
-            (m.year && m.year.toLowerCase().includes(q)) ||
-            m.id.toLowerCase().includes(q))
-        ) {
-          filtered.push(id);
-        }
-      }
+      const allMeta = await this.getMetaById(order);
+      metaById = allMeta;
+      listSource = order.filter((id) => {
+        const m = allMeta.get(id);
+        return m ? this.matchesQuery(m, q) : false;
+      });
     }
-    const source = q ? filtered : order;
 
-    const slice = source.slice(offset, offset + limit);
-    const metas = await Promise.all(
-      slice.map((id) => this.state.storage.get<ImageMeta>(`${META_PREFIX}${id}`)),
-    );
+    const slice = listSource.slice(offset, offset + limit);
+    if (!metaById) metaById = await this.getMetaById(slice);
 
-    const items = metas.filter((m): m is ImageMeta => Boolean(m));
+    const items = slice
+      .map((id) => metaById.get(id))
+      .filter((m): m is ImageMeta => Boolean(m));
     const nextOffset = offset + slice.length;
     const nextCursor =
-      nextOffset < source.length ? btoa(JSON.stringify({ offset: nextOffset })) : null;
+      nextOffset < listSource.length ? btoa(JSON.stringify({ offset: nextOffset })) : null;
 
     const body: ListResponse = { items, cursor: nextCursor };
     return Response.json(body);
@@ -197,5 +223,32 @@ export class ImageIndex {
     ]);
 
     return Response.json({ ok: true, removed: payload.id });
+  }
+
+  private async getMetaById(ids: string[]): Promise<Map<string, ImageMeta>> {
+    const map = new Map<string, ImageMeta>();
+    for (let i = 0; i < ids.length; i += META_READ_BATCH) {
+      const chunk = ids.slice(i, i + META_READ_BATCH);
+      const metas = await Promise.all(
+        chunk.map((id) => this.state.storage.get<ImageMeta>(`${META_PREFIX}${id}`)),
+      );
+      chunk.forEach((id, j) => {
+        const m = metas[j];
+        if (m) map.set(id, m);
+      });
+    }
+    return map;
+  }
+
+  private matchesQuery(m: ImageMeta, q: string): boolean {
+    return (
+      (m.alt?.toLowerCase().includes(q) ?? false) ||
+      (m.name?.toLowerCase().includes(q) ?? false) ||
+      (m.location?.toLowerCase().includes(q) ?? false) ||
+      (m.cameraBody?.toLowerCase().includes(q) ?? false) ||
+      (m.filmStock?.toLowerCase().includes(q) ?? false) ||
+      (m.year?.toLowerCase().includes(q) ?? false) ||
+      m.id.toLowerCase().includes(q)
+    );
   }
 }

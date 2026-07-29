@@ -36,5 +36,11 @@ new_sqlite_classes = ["ImageIndex"]
 # ACCESS_BYPASS_DEV — add ONLY for local `wrangler dev` if you are not going through Access.
 # ACCESS_BYPASS_DEV = "true"
 #
+# ACCESS_TEAM_DOMAIN — Cloudflare Access team (short name or full issuer URL). Required in production.
+# ACCESS_TEAM_DOMAIN = "your-team"
+#
+# ACCESS_AUD — optional Access application AUD tag; when set, JWT audience is checked.
+# ACCESS_AUD = "your-access-application-aud-tag"
+#
 # R2_PUBLIC_HOST — optional; if set, image resizing uses this host as origin instead of the Worker /media route.
 # R2_PUBLIC_HOST = "pub.example.com"

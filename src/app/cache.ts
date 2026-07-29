@@ -1,4 +1,15 @@
-export const getEdgeCache = () => (caches as unknown as { default: Cache }).default;
+const noopCache: Cache = {
+  match: async () => undefined,
+  put: async () => {},
+  delete: async () => false,
+  add: async () => {},
+  addAll: async () => {},
+  keys: async () => [],
+  matchAll: async () => [],
+};
+
+export const getEdgeCache = (): Cache =>
+  (globalThis as { caches?: { default?: Cache } }).caches?.default ?? noopCache;
 
 const formatPref = (accept: string | undefined): string => {
   if (accept?.includes('image/avif')) return 'avif';

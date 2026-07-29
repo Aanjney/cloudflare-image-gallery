@@ -1,4 +1,14 @@
 import { buildCacheKey, getEdgeCache } from '../app/cache';
+import {
+  MEDIA_NOT_MODIFIED_CACHE,
+  PUBLIC_IMAGE_CACHE,
+  buildR2ImageResponse,
+  buildTransformedImageResponse,
+  etagsMatch,
+  notFoundResponse,
+  notModifiedResponse,
+  r2ObjectEtag,
+} from '../app/mediaResponse';
 import { addSecurityHeaders } from '../app/security';
 import { getIndexStub, type GalleryApp } from '../app/worker';
 import type { Env, ImageMeta } from '../types';
@@ -20,39 +30,18 @@ export const registerMediaRoutes = (app: GalleryApp) => {
     const id = c.req.param('id');
     const stub = getIndexStub(c.env);
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
-    if (!metaResp.ok) {
-      return c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' });
-    }
+    if (!metaResp.ok) return notFoundResponse();
+
     const meta = (await metaResp.json()) as ImageMeta;
     const obj = await c.env.IMAGES_BUCKET.get(meta.key);
-    if (!obj || !obj.body) {
-      return addSecurityHeaders(
-        c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' }),
-      );
+    if (!obj || !obj.body) return notFoundResponse(true);
+
+    const etag = r2ObjectEtag(obj, meta);
+    if (etagsMatch(c.req.header('if-none-match'), etag)) {
+      return notModifiedResponse(etag, MEDIA_NOT_MODIFIED_CACHE);
     }
 
-    const etag = obj.httpEtag || obj.etag || `"${meta.id}-${meta.size}"`;
-    const ifNoneMatch = c.req.header('if-none-match');
-    if (etag && ifNoneMatch && ifNoneMatch.replace(/W\//, '') === etag.replace(/W\//, '')) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          ETag: etag,
-          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
-        },
-      });
-    }
-
-    const headers = new Headers();
-    headers.set('Content-Type', meta.contentType || 'image/jpeg');
-    headers.set(
-      'Cache-Control',
-      'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
-    );
-    headers.set('Vary', 'Accept');
-    if (etag) headers.set('ETag', etag);
-    if (typeof obj.size === 'number') headers.set('Content-Length', String(obj.size));
-    const resp = addSecurityHeaders(new Response(obj.body, { headers }));
+    const resp = addSecurityHeaders(buildR2ImageResponse(obj, meta));
     c.executionCtx?.waitUntil(cache.put(cacheReq, resp.clone()));
     return resp;
   });
@@ -73,8 +62,8 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     const stub = getIndexStub(c.env);
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
-    if (!metaResp.ok)
-      return c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' });
+    if (!metaResp.ok) return notFoundResponse();
+
     const meta = (await metaResp.json()) as ImageMeta;
 
     const origin = buildImageOrigin(c.env, meta.key) || `${new URL(c.req.url).origin}/media/${id}`;
@@ -90,17 +79,8 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     const cacheTag = `img-${id}-w${imageOpts.width || 'orig'}-q${imageOpts.quality || ''}-${imageOpts.format || ''}`;
     const etag = `"v-${id}-${imageOpts.width || 'orig'}-${imageOpts.quality || ''}-${imageOpts.format || ''}"`;
-    const ifNoneMatch = c.req.header('if-none-match');
-    if (etag && ifNoneMatch && ifNoneMatch.replace(/W\//, '') === etag.replace(/W\//, '')) {
-      return new Response(null, {
-        status: 304,
-        headers: {
-          ETag: etag,
-          'Cache-Control':
-            'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
-          Vary: 'Accept',
-        },
-      });
+    if (etagsMatch(c.req.header('if-none-match'), etag)) {
+      return notModifiedResponse(etag, PUBLIC_IMAGE_CACHE, { Vary: 'Accept' });
     }
 
     const resp = await fetch(origin, {
@@ -114,33 +94,13 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     if (!resp.ok) {
       const obj = await c.env.IMAGES_BUCKET.get(meta.key);
-      if (!obj?.body)
-        return addSecurityHeaders(
-          c.json({ error: 'Not found' }, 404, { 'Cache-Control': 'private, no-store' }),
-        );
-      const hdrs = new Headers();
-      hdrs.set('Content-Type', meta.contentType || 'image/jpeg');
-      hdrs.set(
-        'Cache-Control',
-        'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
-      );
-      hdrs.set('Vary', 'Accept');
-      const rawEtag = obj.httpEtag || obj.etag || `"${meta.id}-${meta.size}"`;
-      if (rawEtag) hdrs.set('ETag', rawEtag);
-      if (typeof obj.size === 'number') hdrs.set('Content-Length', String(obj.size));
-      const fallback = addSecurityHeaders(new Response(obj.body, { headers: hdrs }));
+      if (!obj?.body) return notFoundResponse(true);
+      const fallback = addSecurityHeaders(buildR2ImageResponse(obj, meta));
       c.executionCtx?.waitUntil(cache.put(edgeKey, fallback.clone()));
       return fallback;
     }
 
-    const headers = new Headers(resp.headers);
-    if (etag) headers.set('ETag', etag);
-    headers.set(
-      'Cache-Control',
-      'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable',
-    );
-    headers.set('Vary', 'Accept');
-    const final = addSecurityHeaders(new Response(resp.body, { headers, status: resp.status }));
+    const final = addSecurityHeaders(buildTransformedImageResponse(resp, etag));
     c.executionCtx?.waitUntil(cache.put(edgeKey, final.clone()));
     return final;
   });

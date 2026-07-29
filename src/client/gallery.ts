@@ -3,7 +3,12 @@ import {
   CAROUSEL_VARIANTS,
   GALLERY_GRID_DEFAULT_VARIANT,
   GALLERY_GRID_VARIANTS,
-} from '../../domain/imageVariants';
+} from '../domain/imageVariants';
+import {
+  emitBrowserEscHelper,
+  emitBrowserImageUrlHelpers,
+  wrapClientIife,
+} from './buildClientScript';
 
 export function buildGalleryScript(): string {
   const gridDefaultVariant = JSON.stringify(GALLERY_GRID_DEFAULT_VARIANT);
@@ -11,9 +16,7 @@ export function buildGalleryScript(): string {
   const carouselDefaultVariant = JSON.stringify(CAROUSEL_DEFAULT_VARIANT);
   const carouselVariants = JSON.stringify(CAROUSEL_VARIANTS);
 
-  return `<script>
-(function(){
-  /* ── Theme toggle ── */
+  return wrapClientIife(`  /* ── Theme toggle ── */
   var html = document.documentElement;
   var toggle = document.getElementById('themeToggle');
   var stored = localStorage.getItem('theme');
@@ -42,22 +45,8 @@ export function buildGalleryScript(): string {
   var CAROUSEL_DEFAULT_VARIANT = ${carouselDefaultVariant};
   var CAROUSEL_VARIANTS = ${carouselVariants};
 
-  var esc = function(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  };
-
-  var imageUrl = function(id, variant) {
-    return '/img/' + id + '?w=' + variant.width + '&q=' + variant.quality + '&fmt=' + variant.format;
-  };
-  var imageSrcset = function(id, variants) {
-    return variants.map(function(variant) {
-      return imageUrl(id, variant) + ' ' + variant.width + 'w';
-    }).join(', ');
-  };
+${emitBrowserEscHelper()}
+${emitBrowserImageUrlHelpers()}
 
   var renderItems = function(items) {
     var frag = document.createDocumentFragment();
@@ -290,7 +279,5 @@ export function buildGalleryScript(): string {
     }
   });
 
-  fetchInitial();
-})();
-</script>`;
+  fetchInitial();`);
 }

@@ -1,4 +1,5 @@
 import type { Context, Next } from 'hono';
+import { verifyAccessJwt } from './accessJwt';
 import type { Env } from '../types';
 
 export const addSecurityHeaders = (resp: Response) => {
@@ -15,12 +16,24 @@ export const addSecurityHeaders = (resp: Response) => {
 };
 
 export const requireAdminAuth = async (c: Context<{ Bindings: Env }>, next: Next) => {
-  const bypass = c.env.ACCESS_BYPASS_DEV === 'true';
-  const hasAccessHeader = Boolean(
-    c.req.header('cf-access-authenticated-user-email') || c.req.header('cf-access-verified-email'),
-  );
+  if (c.env.ACCESS_BYPASS_DEV === 'true') {
+    await next();
+    return;
+  }
 
-  if (!bypass && !hasAccessHeader) {
+  const teamDomain = c.env.ACCESS_TEAM_DOMAIN?.trim();
+  if (!teamDomain) {
+    return c.json(
+      {
+        error: 'Unauthorized',
+        message: 'Set ACCESS_TEAM_DOMAIN to your Cloudflare Access team domain.',
+      },
+      401,
+    );
+  }
+
+  const token = c.req.header('Cf-Access-Jwt-Assertion') ?? c.req.header('cf-access-jwt-assertion');
+  if (!token) {
     return c.json(
       {
         error: 'Unauthorized',
@@ -29,6 +42,15 @@ export const requireAdminAuth = async (c: Context<{ Bindings: Env }>, next: Next
       },
       401,
     );
+  }
+
+  const result = await verifyAccessJwt(token, {
+    teamDomain,
+    audience: c.env.ACCESS_AUD,
+  });
+
+  if (!result.ok) {
+    return c.json({ error: 'Unauthorized', message: result.reason }, 401);
   }
 
   await next();

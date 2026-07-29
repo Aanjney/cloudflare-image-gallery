@@ -2,6 +2,8 @@ export type Env = {
   IMAGES_BUCKET: R2Bucket;
   IMAGE_INDEX: DurableObjectNamespace;
   ACCESS_BYPASS_DEV?: string;
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
   R2_PUBLIC_HOST?: string;
   ADMIN_PATH?: string;
 };
@@ -26,4 +28,11 @@ export type ImageMeta = {
 export type ListResponse = {
   items: ImageMeta[];
   cursor?: string | null;
+};
+
+export type StatsResponse = {
+  total: number;
+  totalBytes: number;
+  latestCreatedAt: string | null;
+  avgSize: number;
 };

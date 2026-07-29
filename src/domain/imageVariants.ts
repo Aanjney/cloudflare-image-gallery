@@ -58,6 +58,12 @@ export const UPLOAD_WARM_VARIANTS: ImageVariant[] = [
 export const imagePath = (id: string, variant: ImageVariant) =>
   `/img/${id}?w=${variant.width}&q=${variant.quality}&fmt=${variant.format}`;
 
+/** JS snippet defining `imageUrl(id, variant)` — must stay aligned with `imagePath`. */
+export const buildBrowserImageUrlHelper = () =>
+  `var imageUrl = function(id, variant) {
+    return '/img/' + id + '?w=' + variant.width + '&q=' + variant.quality + '&fmt=' + variant.format;
+  };`;
+
 export const purgeImagePaths = (id: string) => {
   const paths = [
     `/img/${id}`,

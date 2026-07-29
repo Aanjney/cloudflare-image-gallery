@@ -1,4 +1,4 @@
-import { ALLOWED_UPLOAD_MIME_TYPES } from '../../domain/uploadPolicy';
+import { ALLOWED_UPLOAD_MIME_TYPES } from '../domain/uploadPolicy';
 
 export function buildAdminUploadScript(): string {
   const allowedUploadTypes = JSON.stringify(ALLOWED_UPLOAD_MIME_TYPES);
@@ -100,18 +100,16 @@ export function buildAdminUploadScript(): string {
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function(){
-        var placeholder = '#0e0e0e';
-        try {
-          var c = document.createElement('canvas'), ctx = c.getContext('2d'), s = 12;
-          c.width = s; c.height = s; ctx.drawImage(img, 0, 0, s, s);
-          var d = ctx.getImageData(0, 0, s, s).data;
-          var r=0,g=0,b=0,t=s*s;
-          for (var i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}
-          placeholder='rgb('+Math.round(r/t)+','+Math.round(g/t)+','+Math.round(b/t)+')';
-        } catch(_){}
-        resolve({width:img.naturalWidth||'',height:img.naturalHeight||'',preview:url,placeholder:placeholder});
+        resolve({
+          width: img.naturalWidth || '',
+          height: img.naturalHeight || '',
+          preview: url,
+          placeholder: placeholderFromImage(img),
+        });
       };
-      img.onerror = function(){ resolve({width:'',height:'',preview:url,placeholder:'#0e0e0e'}); };
+      img.onerror = function(){
+        resolve({ width: '', height: '', preview: url, placeholder: PLACEHOLDER_DEFAULT });
+      };
       img.src = url;
     });
   };

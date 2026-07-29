@@ -1,22 +1,25 @@
-import { ADMIN_BACKFILL_VARIANT, ADMIN_THUMB_VARIANT } from '../../domain/imageVariants';
-import { UPLOAD_FORMAT_LABEL } from '../../domain/uploadPolicy';
-
-import { buildAdminManageScript } from './manageScript';
-import { buildAdminUploadScript } from './uploadScript';
+import { ADMIN_BACKFILL_VARIANT, ADMIN_THUMB_VARIANT } from '../domain/imageVariants';
+import { UPLOAD_FORMAT_LABEL } from '../domain/uploadPolicy';
+import { buildAdminManageScript } from './adminManage';
+import { buildAdminUploadScript } from './adminUpload';
+import {
+  emitBrowserImageUrlHelpers,
+  emitBrowserPlaceholderHelper,
+  wrapClientIife,
+} from './buildClientScript';
 
 export function buildAdminScript(adminPrefix: string): string {
   const adminThumbVariant = JSON.stringify(ADMIN_THUMB_VARIANT);
   const adminBackfillVariant = JSON.stringify(ADMIN_BACKFILL_VARIANT);
   const uploadFormatLabel = JSON.stringify(UPLOAD_FORMAT_LABEL);
 
-  return `<script>
-(function(){
-  var ADMIN = '${adminPrefix}';
+  return wrapClientIife(`  var ADMIN = '${adminPrefix}';
   var qs = function(id){ return document.getElementById(id); };
   var ADMIN_THUMB_VARIANT = ${adminThumbVariant};
   var ADMIN_BACKFILL_VARIANT = ${adminBackfillVariant};
   var UPLOAD_FORMAT_LABEL = ${uploadFormatLabel};
-  var imageUrl = function(id, variant){ return '/img/' + id + '?w=' + variant.width + '&q=' + variant.quality + '&fmt=' + variant.format; };
+${emitBrowserImageUrlHelpers()}
+${emitBrowserPlaceholderHelper()}
 
   /* ── Sidebar ── */
   var sidebar = qs('sidebar');
@@ -49,7 +52,5 @@ export function buildAdminScript(adminPrefix: string): string {
 ${buildAdminUploadScript()}
 ${buildAdminManageScript()}
   renderQueue();
-  loadManagePage(null);
-})();
-</script>`;
+  loadManagePage(null);`);
 }

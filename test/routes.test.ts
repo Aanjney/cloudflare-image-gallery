@@ -21,6 +21,7 @@ class FakeImageIndexNamespace {
 class FakeImagesBucket {
   readonly putKeys: string[] = [];
   readonly deleteKeys: string[] = [];
+  deleteFailures = 0;
 
   async put(key: string) {
     this.putKeys.push(key);
@@ -32,6 +33,10 @@ class FakeImagesBucket {
   }
 
   async delete(key: string) {
+    if (this.deleteFailures > 0) {
+      this.deleteFailures--;
+      throw new Error('R2 delete failed');
+    }
     this.deleteKeys.push(key);
   }
 }
@@ -105,7 +110,7 @@ describe('admin routes', () => {
   });
 
   it('deletes the uploaded R2 key when metadata recording fails', async () => {
-    const doFetch = vi.fn<StubFetch>(() => new Response('DO unavailable', { status: 500 }));
+    const doFetch = vi.fn(() => new Response('DO unavailable', { status: 500 }));
     const { env, bucket } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
     const form = new FormData();
     form.set('file', new File(['png'], 'photo.png', { type: 'image/png' }));
@@ -130,7 +135,7 @@ describe('admin routes', () => {
   });
 
   it('does not delete from R2 when metadata delete fails', async () => {
-    const doFetch = vi.fn<StubFetch>((request: RequestInfo | URL) => {
+    const doFetch = vi.fn((request: RequestInfo | URL) => {
       const url = request instanceof Request ? request.url : request.toString();
       const path = new URL(url).pathname;
       if (path === '/meta/img-1') {
@@ -158,5 +163,76 @@ describe('admin routes', () => {
       detail: 'delete failed',
     });
     expect(bucket.deleteKeys).toEqual([]);
+  });
+
+  it('returns partial failure when R2 delete fails after index removal', async () => {
+    const doFetch = vi.fn((request: RequestInfo | URL) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      const path = new URL(url).pathname;
+      if (path === '/meta/img-1') {
+        return Response.json(imageMeta());
+      }
+      if (path === '/delete') {
+        return Response.json({ ok: true });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { env, bucket } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
+    bucket.deleteFailures = 3;
+
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await app.fetch(
+      adminRequest('/_admin/api/images/delete', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'img-1' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: 'Index removed but storage delete failed',
+      id: 'img-1',
+      orphanKey: 'images/img-1.jpg',
+      detail: 'R2 delete failed',
+    });
+    expect(bucket.deleteKeys).toEqual([]);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      'orphan R2 object after index delete: id=img-1 key=images/img-1.jpg',
+      'R2 delete failed',
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('retries R2 delete and succeeds when a transient failure clears', async () => {
+    const doFetch = vi.fn((request: RequestInfo | URL) => {
+      const url = request instanceof Request ? request.url : request.toString();
+      const path = new URL(url).pathname;
+      if (path === '/meta/img-1') {
+        return Response.json(imageMeta());
+      }
+      if (path === '/delete') {
+        return Response.json({ ok: true });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const { env, bucket } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
+    bucket.deleteFailures = 1;
+
+    const response = await app.fetch(
+      adminRequest('/_admin/api/images/delete', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'img-1' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      env,
+    );
+
+    expect(response.ok).toBe(true);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, id: 'img-1' });
+    expect(bucket.deleteKeys).toEqual(['images/img-1.jpg']);
   });
 });

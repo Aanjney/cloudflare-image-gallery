@@ -1,8 +1,10 @@
 import { buildAdminHTML } from '../html/admin';
 import { getAdminPrefix } from '../app/adminPath';
 import { getEdgeCache } from '../app/cache';
+import { parseIdBody, parseImageUpdateBody, parseRequestJson } from '../app/parseRequest';
 import { addSecurityHeaders, requireAdminAuth } from '../app/security';
 import { getIndexStub, type GalleryApp } from '../app/worker';
+import { deleteImage } from '../domain/deleteImage';
 import { UPLOAD_WARM_VARIANTS, imagePath, purgeImageCacheTargets } from '../domain/imageVariants';
 import { ALLOWED_UPLOAD_TYPE_SET } from '../domain/uploadPolicy';
 import type { ImageMeta } from '../types';
@@ -30,13 +32,22 @@ export const registerAdminRoutes = (app: GalleryApp) => {
 
   app.get('/_admin/ping', (c) => c.json({ ok: true, admin: true, now: new Date().toISOString() }));
 
+  app.get('/_admin/api/stats', async (c) => {
+    const stub = getIndexStub(c.env);
+    const resp = await stub.fetch('https://index/stats');
+    if (!resp.ok) {
+      const message = await resp.text();
+      return c.json({ error: 'Failed to load stats', detail: message }, 500);
+    }
+    return addSecurityHeaders(c.json(await resp.json()));
+  });
+
   app.post('/_admin/api/images/delete', async (c) => {
-    const parsed = (await c.req.json().catch(() => ({}))) as { id?: string };
-    const id =
-      parsed && typeof parsed.id === 'string' && parsed.id.trim().length > 0
-        ? parsed.id
-        : undefined;
-    if (!id) return c.json({ error: 'id is required' }, 400);
+    const json = await parseRequestJson(c.req);
+    if (!json.ok) return c.json({ error: json.error }, 400);
+    const parsed = parseIdBody(json.data);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const { id } = parsed.data;
 
     const stub = getIndexStub(c.env);
     const metaResp = await stub.fetch(`https://index/meta/${id}`);
@@ -46,28 +57,44 @@ export const registerAdminRoutes = (app: GalleryApp) => {
       );
     const meta = (await metaResp.json()) as ImageMeta;
 
-    const delResp = await stub.fetch('https://index/delete', {
-      method: 'POST',
-      body: JSON.stringify({ id }),
-    });
-    if (!delResp.ok) {
-      const msg = await delResp.text();
-      return c.json({ error: 'Failed to remove index', detail: msg }, 500);
+    const result = await deleteImage(c.env.IMAGES_BUCKET, stub, id, meta);
+    const purgeCache = async () => {
+      const cache = getEdgeCache();
+      const base = new URL(c.req.url);
+      const purgeTargets = purgeImageCacheTargets(id, base);
+      await Promise.allSettled(purgeTargets.map((t) => cache.delete(t)));
+    };
+
+    if (!result.ok) {
+      if (result.stage === 'index') {
+        return c.json({ error: result.error, detail: result.detail }, 500);
+      }
+      await purgeCache();
+      return addSecurityHeaders(
+        c.json(
+          {
+            ok: false,
+            error: result.error,
+            id: result.id,
+            orphanKey: result.orphanKey,
+            detail: result.detail,
+          },
+          500,
+          { 'Cache-Control': 'private, no-store' },
+        ),
+      );
     }
 
-    await c.env.IMAGES_BUCKET.delete(meta.key);
-
-    const cache = getEdgeCache();
-    const base = new URL(c.req.url);
-    const purgeTargets = purgeImageCacheTargets(id, base);
-    await Promise.allSettled(purgeTargets.map((t) => cache.delete(t)));
-
+    await purgeCache();
     return addSecurityHeaders(c.json({ ok: true, id }));
   });
 
   app.post('/_admin/api/images/update', async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as Partial<ImageMeta> & { id?: string };
-    if (!body?.id) return c.json({ error: 'id is required' }, 400);
+    const json = await parseRequestJson(c.req);
+    if (!json.ok) return c.json({ error: json.error }, 400);
+    const parsed = parseImageUpdateBody(json.data);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const body = parsed.data;
 
     const stub = getIndexStub(c.env);
     const doResp = await stub.fetch('https://index/update', {
