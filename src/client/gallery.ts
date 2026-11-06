@@ -3,10 +3,14 @@ import {
   CAROUSEL_VARIANTS,
   GALLERY_GRID_DEFAULT_VARIANT,
   GALLERY_GRID_VARIANTS,
+  GALLERY_FIRST_PAGE_PATH,
 } from '../domain/imageVariants';
 import {
   emitBrowserEscHelper,
+  emitBrowserFetchHelper,
   emitBrowserImageUrlHelpers,
+  emitBrowserPageWalker,
+  emitThemeToggle,
   wrapClientIife,
 } from './buildClientScript';
 
@@ -17,15 +21,7 @@ export function buildGalleryScript(): string {
   const carouselVariants = JSON.stringify(CAROUSEL_VARIANTS);
 
   return wrapClientIife(`  /* ── Theme toggle ── */
-  var html = document.documentElement;
-  var toggle = document.getElementById('themeToggle');
-  var stored = localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') html.setAttribute('data-theme', stored);
-  toggle.addEventListener('click', function(){
-    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-  });
+${emitThemeToggle()}
 
   var grid = document.getElementById('grid');
   var carousel = document.getElementById('carousel');
@@ -40,6 +36,7 @@ export function buildGalleryScript(): string {
   var currentIndex = -1;
   var touchStartX = 0;
   var touchStartY = 0;
+  var lastFocus = null;
   var GRID_DEFAULT_VARIANT = ${gridDefaultVariant};
   var GRID_VARIANTS = ${gridVariants};
   var CAROUSEL_DEFAULT_VARIANT = ${carouselDefaultVariant};
@@ -47,6 +44,8 @@ export function buildGalleryScript(): string {
 
 ${emitBrowserEscHelper()}
 ${emitBrowserImageUrlHelpers()}
+${emitBrowserFetchHelper()}
+${emitBrowserPageWalker()}
 
   var renderItems = function(items) {
     var frag = document.createDocumentFragment();
@@ -73,7 +72,7 @@ ${emitBrowserImageUrlHelpers()}
       var isAboveFold = (grid.childElementCount + frag.childElementCount) < 3;
       img.loading = isAboveFold ? 'eager' : 'lazy';
       img.decoding = 'async';
-      img.alt = item.name || item.alt || 'Film photograph';
+      img.alt = item.alt || 'Film photograph';
       img.src = imageUrl(item.id, GRID_DEFAULT_VARIANT);
       img.srcset = imageSrcset(item.id, GRID_VARIANTS);
       img.sizes = '(max-width:420px) 96vw,(max-width:640px) 88vw,(max-width:900px) 50vw,(max-width:1200px) 36vw,28vw';
@@ -123,15 +122,34 @@ ${emitBrowserImageUrlHelpers()}
     return arr;
   };
 
+  /* The first URL matches the <link rel="preload"> in the page head. */
+  var messageEl = function(text) {
+    var div = document.createElement('div');
+    div.className = 'gallery-message';
+    div.textContent = text;
+    return div;
+  };
+
   var fetchInitial = function() {
-    fetch('/api/images?limit=200')
-      .then(function(r){ return r.json(); })
-      .then(function(data){
-        var items = shuffle(data.items || []);
-        allItems = allItems.concat(items);
-        renderItems(items);
-      })
-      .catch(function(){});
+    var failed = false;
+    var seenIds = {};
+    forEachImagePage(${JSON.stringify(GALLERY_FIRST_PAGE_PATH)}, function(items) {
+      /* Pages can overlap when photos are added or deleted between requests. */
+      var page = shuffle(items.filter(function(item) {
+        if (seenIds[item.id]) return false;
+        seenIds[item.id] = true;
+        return true;
+      }));
+      allItems = allItems.concat(page);
+      renderItems(page);
+      if (carousel.open && currentIndex >= 0) updateMeta(currentIndex);
+    }, function() {
+      failed = true;
+    }).then(function() {
+      if (!allItems.length) {
+        grid.appendChild(messageEl(failed ? 'Photos didn\\'t load. Refresh the page to try again.' : 'No photos yet.'));
+      }
+    });
   };
 
   /* ── Carousel ── */
@@ -160,16 +178,16 @@ ${emitBrowserImageUrlHelpers()}
     var item = allItems[idx];
     var html = '';
     if (item.cameraBody) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined">photo_camera</span><span>' + esc(item.cameraBody) + '</span></div>';
+      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">photo_camera</span><span>' + esc(item.cameraBody) + '</span></div>';
     }
     if (item.filmStock) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined">camera_roll</span><span>' + esc(item.filmStock) + '</span></div>';
+      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">camera_roll</span><span>' + esc(item.filmStock) + '</span></div>';
     }
     if (item.location) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined">location_on</span><span>' + esc(item.location) + '</span></div>';
+      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">location_on</span><span>' + esc(item.location) + '</span></div>';
     }
     if (item.year) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined">calendar_today</span><span>' + esc(item.year) + '</span></div>';
+      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><span>' + esc(item.year) + '</span></div>';
     }
     cDetails.innerHTML = html;
     cCounter.textContent = String(idx+1).padStart(2,'0') + ' / ' + String(allItems.length).padStart(2,'0');
@@ -180,11 +198,11 @@ ${emitBrowserImageUrlHelpers()}
     currentIndex = idx;
     var item = allItems[idx];
     updateMeta(idx);
-    carousel.classList.add('open');
+    if (!carousel.open) carousel.showModal();
     document.body.style.overflow = 'hidden';
 
     var pre = preloadImage(item.id);
-    cImg.alt = item.name || item.alt || 'Film photograph';
+    cImg.alt = item.alt || 'Film photograph';
 
     if (pre.complete && pre.naturalWidth > 0) {
       cImg.classList.remove('loading');
@@ -214,13 +232,21 @@ ${emitBrowserImageUrlHelpers()}
   var openCarousel = function(id) {
     var idx = -1;
     for (var i = 0; i < allItems.length; i++) { if (allItems[i].id === id) { idx = i; break; } }
-    if (idx !== -1) showCarouselIndex(idx);
+    if (idx !== -1) {
+      lastFocus = document.activeElement;
+      showCarouselIndex(idx);
+    }
   };
 
   var closeCarouselFn = function() {
-    carousel.classList.remove('open');
+    if (carousel.open) carousel.close();
     document.body.style.overflow = '';
   };
+
+  carousel.addEventListener('close', function() {
+    document.body.style.overflow = '';
+    if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
+  });
 
   carousel.addEventListener('click', function(e) {
     if (e.target === carousel || !e.target.closest('.carousel-content')) closeCarouselFn();
@@ -236,8 +262,7 @@ ${emitBrowserImageUrlHelpers()}
   });
   cImg.addEventListener('click', function(e){ e.stopPropagation(); });
   document.addEventListener('keydown', function(e){
-    if (!carousel.classList.contains('open')) return;
-    if (e.key === 'Escape') closeCarouselFn();
+    if (!carousel.open) return;
     if (e.key === 'ArrowRight') showCarouselIndex((currentIndex + 1) % allItems.length);
     if (e.key === 'ArrowLeft') showCarouselIndex((currentIndex - 1 + allItems.length) % allItems.length);
   });

@@ -1,30 +1,30 @@
-import { UPLOAD_ACCEPT_ATTRIBUTE } from '../../domain/uploadPolicy';
+import { UPLOAD_ACCEPT_ATTRIBUTE, UPLOAD_FORMAT_LABEL } from '../../domain/uploadPolicy';
 
 export function buildAdminBody(): string {
-  return `<button class="mobile-toggle" type="button" aria-label="Toggle sidebar" id="mobileToggle">
-  <span class="material-symbols-outlined">menu</span>
+  return `<button class="mobile-toggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="false" id="mobileToggle">
+  <span aria-hidden="true" class="material-symbols-outlined">menu</span>
 </button>
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-brand"></div>
   <nav class="sidebar-nav" aria-label="Admin navigation">
-    <button class="nav-item active" data-tab="upload" type="button">
-      <span class="material-symbols-outlined">add_a_photo</span><span>Upload</span>
+    <button class="nav-item active" data-tab="upload" type="button" aria-current="page">
+      <span aria-hidden="true" class="material-symbols-outlined">add_a_photo</span><span>Upload</span>
     </button>
     <button class="nav-item" data-tab="manage" type="button">
-      <span class="material-symbols-outlined">grid_view</span><span>Manage</span>
+      <span aria-hidden="true" class="material-symbols-outlined">grid_view</span><span>Manage</span>
     </button>
   </nav>
   <div class="sidebar-footer">
-    <a href="/" class="nav-item"><span class="material-symbols-outlined">home</span><span>View Gallery</span></a>
+    <a href="/" class="nav-item"><span aria-hidden="true" class="material-symbols-outlined">home</span><span>View gallery</span></a>
   </div>
 </aside>
 
 <header class="top-bar">
   <div></div>
   <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light/dark mode">
-    <span class="material-symbols-outlined icon-dark">dark_mode</span>
-    <span class="material-symbols-outlined icon-light">light_mode</span>
+    <span aria-hidden="true" class="material-symbols-outlined icon-dark">dark_mode</span>
+    <span aria-hidden="true" class="material-symbols-outlined icon-light">light_mode</span>
   </button>
 </header>
 
@@ -36,16 +36,17 @@ export function buildAdminBody(): string {
     </header>
     <div id="dropArea" class="drop-zone">
       <div class="drop-zone-hl"></div>
-      <span class="material-symbols-outlined drop-icon">cloud_upload</span>
-      <h3>Drag negatives here</h3><p>JPG, PNG, WebP</p>
+      <span aria-hidden="true" class="material-symbols-outlined drop-icon">cloud_upload</span>
+      <h3>Drag photos here</h3><p>${UPLOAD_FORMAT_LABEL}</p>
+      <button type="button" class="btn-ghost">Choose files</button>
       <div class="corner corner-tl"></div><div class="corner corner-tr"></div>
       <div class="corner corner-bl"></div><div class="corner corner-br"></div>
       <input id="filePicker" type="file" accept="${UPLOAD_ACCEPT_ATTRIBUTE}" multiple style="display:none" />
     </div>
     <div class="queue-header">
-      <h3>Pending Queue (<span id="queueCount">0</span>)</h3>
+      <h3>Pending queue (<span id="queueCount">0</span>)</h3>
       <div class="queue-actions-bar">
-        <button id="clearQueue" type="button" class="btn-ghost">Clear All</button>
+        <button id="clearQueue" type="button" class="btn-ghost">Clear all</button>
       </div>
     </div>
     <div id="uploadProgress" class="upload-progress" style="display:none">
@@ -54,11 +55,11 @@ export function buildAdminBody(): string {
         <span class="upload-progress-count" id="uploadCount"></span>
       </div>
       <div class="upload-progress-track"><div class="upload-progress-fill" id="uploadFill"></div></div>
-      <span class="upload-progress-status" id="uploadStatus" role="status" aria-live="polite"></span>
     </div>
+    <p class="upload-progress-status" id="uploadStatus" role="status"></p>
     <div id="queueList" class="queue-list"></div>
     <div class="upload-footer">
-      <button id="startUpload" type="button" class="btn-primary-lg">Upload to Archive</button>
+      <button id="startUpload" type="button" class="btn-primary-lg">Upload to archive</button>
     </div>
   </section>
 
@@ -68,16 +69,16 @@ export function buildAdminBody(): string {
       <div class="header-line"></div>
     </header>
     <div class="stats-grid" id="statsGrid">
-      <div class="stat-card stat-card-alt"><p class="stat-label">Total Shots</p><p class="stat-value" id="statTotal">&mdash;</p></div>
-      <div class="stat-card"><p class="stat-label">Storage Used</p><p class="stat-value" id="statStorage">&mdash;</p></div>
-      <div class="stat-card stat-card-alt"><p class="stat-label">Latest Upload</p><p class="stat-value" id="statLatest">&mdash;</p></div>
-      <div class="stat-card"><p class="stat-label">Avg Size</p><p class="stat-value" id="statAvgSize">&mdash;</p></div>
+      <div class="stat-card stat-card-alt"><p class="stat-label">Total photos</p><p class="stat-value" id="statTotal">&mdash;</p></div>
+      <div class="stat-card"><p class="stat-label">Storage used</p><p class="stat-value" id="statStorage">&mdash;</p></div>
+      <div class="stat-card stat-card-alt"><p class="stat-label">Latest upload</p><p class="stat-value" id="statLatest">&mdash;</p></div>
+      <div class="stat-card"><p class="stat-label">Average size</p><p class="stat-value" id="statAvgSize">&mdash;</p></div>
     </div>
     <div class="manage-toolbar">
-      <div class="search-box"><span class="material-symbols-outlined">search</span><input id="searchInput" type="text" placeholder="Search archive..." /></div>
+      <div class="search-box"><span aria-hidden="true" class="material-symbols-outlined">search</span><input id="searchInput" type="text" aria-label="Search archive" placeholder="Search archive…" /></div>
       <div class="toolbar-actions">
-        <span id="manageError" class="error-text" aria-live="assertive" role="status"></span>
-        <button id="backfillPlaceholders" class="btn-ghost" type="button">Backfill Colors</button>
+        <span id="manageError" class="error-text" role="status"></span>
+        <button id="backfillPlaceholders" class="btn-ghost" type="button">Backfill colors</button>
       </div>
     </div>
     <div class="manage-table-wrap">
@@ -88,7 +89,7 @@ export function buildAdminBody(): string {
         <tbody id="manageBody"></tbody>
       </table>
     </div>
-    <div id="manageEmpty" class="empty-state" style="display:none">No items found in archive.</div>
+    <div id="manageEmpty" class="empty-state" style="display:none"></div>
     <footer class="manage-footer">
       <span id="pageInfo" class="page-info"></span>
       <div class="manage-footer-nav">
