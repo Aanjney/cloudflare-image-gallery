@@ -1,61 +1,42 @@
-import type { ImageMeta } from '../types';
+import { retry } from '../app/retry';
+import { removeImageMeta } from '../app/worker';
+import type { Env, ImageMeta } from '../types';
 
 export type DeleteImageResult =
   | { ok: true; id: string }
-  | {
-      ok: false;
-      stage: 'index' | 'storage';
-      id: string;
-      error: string;
-      detail?: string;
-      orphanKey?: string;
-    };
+  | { ok: false; stage: 'index' | 'storage'; id: string; error: string; detail?: string };
 
-// ponytail: 3 immediate retries, no backoff; upgrade to tombstone/reconcile queue if orphans matter
-const R2_DELETE_ATTEMPTS = 3;
+export const R2_DELETE_ATTEMPTS = 3;
 
-async function deleteR2Object(bucket: R2Bucket, key: string): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < R2_DELETE_ATTEMPTS; attempt++) {
-    try {
-      await bucket.delete(key);
-      return;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-export async function deleteImage(
-  bucket: R2Bucket,
-  stub: DurableObjectStub,
-  id: string,
-  meta: ImageMeta,
-): Promise<DeleteImageResult> {
-  const delResp = await stub.fetch('https://index/delete', {
-    method: 'POST',
-    body: JSON.stringify({ id }),
-  });
-  if (!delResp.ok) {
-    const detail = await delResp.text();
-    return { ok: false, stage: 'index', id, error: 'Failed to remove index', detail };
-  }
-
+/**
+ * Deletes the R2 object before the index entry. The index holds the only pointer to the
+ * object, so this order leaves every partial failure in a state a retry can finish.
+ * Both steps are idempotent: R2 delete of a missing key succeeds, and an index 404 means
+ * another request already finished the delete.
+ */
+export async function deleteImage(env: Env, meta: ImageMeta): Promise<DeleteImageResult> {
+  const { id, key } = meta;
   try {
-    await deleteR2Object(bucket, meta.key);
+    await retry(() => env.IMAGES_BUCKET.delete(key), {
+      attempts: R2_DELETE_ATTEMPTS,
+      baseMs: 100,
+      capMs: 1000,
+    });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    console.error(`orphan R2 object after index delete: id=${id} key=${meta.key}`, detail);
-    return {
-      ok: false,
-      stage: 'storage',
-      id,
-      error: 'Index removed but storage delete failed',
-      detail,
-      orphanKey: meta.key,
-    };
+    console.error(`R2 delete failed, index kept for retry: id=${id} key=${key}`, detail);
+    return { ok: false, stage: 'storage', id, error: 'Failed to delete image file', detail };
   }
 
+  const removed = await removeImageMeta(env, id);
+  if (!removed.ok && !removed.notFound) {
+    return {
+      ok: false,
+      stage: 'index',
+      id,
+      error: 'Failed to remove index',
+      detail: removed.detail,
+    };
+  }
   return { ok: true, id };
 }

@@ -28,22 +28,26 @@ class_name = "ImageIndex"
 tag = "001_init"
 new_sqlite_classes = ["ImageIndex"]
 
-# Optional [vars] — the app reads these from env; unset means defaults (see README).
+# Required [vars]. Admin routes return 401 when either is unset.
 #
-# ADMIN_PATH — admin URL prefix (default in code: /_admin). Set for a non-default path.
-# ADMIN_PATH = "/your-secret-admin-path"
-#
-# ACCESS_BYPASS_DEV — add ONLY for local `wrangler dev` if you are not going through Access.
-# ACCESS_BYPASS_DEV = "true"
-#
-# ACCESS_TEAM_DOMAIN — Cloudflare Access team. Any of these work:
+# ACCESS_TEAM_DOMAIN is required unless ACCESS_BYPASS_DEV = "true".
+# It is your Cloudflare Access team. Any of these work:
 #   "your-team"
 #   "your-team.cloudflareaccess.com"
 #   "https://your-team.cloudflareaccess.com"
 # ACCESS_TEAM_DOMAIN = "your-team"
 #
-# ACCESS_AUD — optional Access application AUD tag; when set, JWT audience is checked.
+# ACCESS_AUD is required unless ACCESS_BYPASS_DEV = "true".
+# It is the Access application's AUD tag (Zero Trust > Access > Applications > your app > Overview).
 # ACCESS_AUD = "your-access-application-aud-tag"
+
+# Optional [vars]. Unset means the defaults in the README.
 #
-# R2_PUBLIC_HOST — optional; if set, image resizing uses this host as origin instead of the Worker /media route.
+# ADMIN_PATH is the admin URL prefix (default in code: /_admin). Set it for a non-default path.
+# ADMIN_PATH = "/your-secret-admin-path"
+#
+# ACCESS_BYPASS_DEV skips Access. Add it ONLY for local `wrangler dev`.
+# ACCESS_BYPASS_DEV = "true"
+#
+# R2_PUBLIC_HOST makes image resizing use this host as origin instead of the Worker /media route.
 # R2_PUBLIC_HOST = "pub.example.com"

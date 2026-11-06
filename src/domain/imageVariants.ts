@@ -8,6 +8,10 @@ export type ImageVariant = {
 
 export const FORMAT_VARIANTS = ['avif', 'webp', 'jpeg'] as const;
 
+export type OutputFormat = (typeof FORMAT_VARIANTS)[number];
+
+export const DEFAULT_QUALITY = 85;
+
 export const GALLERY_GRID_DEFAULT_VARIANT: ImageVariant = {
   width: 960,
   quality: 80,
@@ -55,40 +59,81 @@ export const UPLOAD_WARM_VARIANTS: ImageVariant[] = [
   { width: 1200, quality: 80, format: 'auto' },
 ];
 
+const ALL_VARIANTS: ImageVariant[] = [
+  ...GALLERY_GRID_VARIANTS,
+  ...CAROUSEL_VARIANTS,
+  ADMIN_THUMB_VARIANT,
+  ADMIN_BACKFILL_VARIANT,
+  ...UPLOAD_WARM_VARIANTS,
+];
+
+const ALLOWED_WIDTHS = [...new Set(ALL_VARIANTS.map((variant) => variant.width))].sort(
+  (a, b) => a - b,
+);
+
+const snapToNearest = (value: number, allowed: readonly number[]): number => {
+  let nearest = allowed[0];
+  let distance = Math.abs(value - nearest);
+  for (const candidate of allowed) {
+    const candidateDistance = Math.abs(value - candidate);
+    if (candidateDistance < distance) {
+      nearest = candidate;
+      distance = candidateDistance;
+    }
+  }
+  return nearest;
+};
+
+export type VariantSize = { width: number | undefined; quality: number };
+
+const ORIGINAL_SIZE: VariantSize = { width: undefined, quality: DEFAULT_QUALITY };
+
+/**
+ * Maps any requested width and quality to a size in the variant registry, so every
+ * cache key /img can write is one that `purgeImageCacheTargets` deletes.
+ */
+export const snapVariant = (
+  width: number | undefined,
+  quality: number = DEFAULT_QUALITY,
+): VariantSize => {
+  if (width === undefined) return ORIGINAL_SIZE;
+  const snappedWidth = snapToNearest(width, ALLOWED_WIDTHS);
+  const qualities = ALL_VARIANTS.filter((v) => v.width === snappedWidth).map((v) => v.quality);
+  return { width: snappedWidth, quality: snapToNearest(quality, qualities) };
+};
+
 export const imagePath = (id: string, variant: ImageVariant) =>
   `/img/${id}?w=${variant.width}&q=${variant.quality}&fmt=${variant.format}`;
 
-/** JS snippet defining `imageUrl(id, variant)` — must stay aligned with `imagePath`. */
+/** JS snippet defining `imageUrl(id, variant)`. It must stay aligned with `imagePath`. */
 export const buildBrowserImageUrlHelper = () =>
   `var imageUrl = function(id, variant) {
     return '/img/' + id + '?w=' + variant.width + '&q=' + variant.quality + '&fmt=' + variant.format;
   };`;
 
-export const purgeImagePaths = (id: string) => {
-  const paths = [
-    `/img/${id}`,
-    ...GALLERY_GRID_VARIANTS.map((variant) => imagePath(id, variant)),
-    ...CAROUSEL_VARIANTS.map((variant) => imagePath(id, variant)),
-    ...UPLOAD_WARM_VARIANTS.map((variant) => imagePath(id, variant)),
-    imagePath(id, ADMIN_THUMB_VARIANT),
-    imagePath(id, ADMIN_BACKFILL_VARIANT),
-  ];
-
-  return [...new Set(paths)];
+export type ImageCacheKeyParts = {
+  id: string;
+  width: number | undefined;
+  quality: number;
+  format: OutputFormat;
 };
 
-export const purgeImageCacheTargets = (id: string, base: URL) => {
-  const targets = [new URL(`/media/${id}`, base).toString()];
+export const mediaCacheKey = (origin: string, id: string): string => `${origin}/media/${id}`;
 
-  for (const path of purgeImagePaths(id)) {
-    const fullUrl = new URL(path, base);
-    targets.push(fullUrl.toString());
-    for (const format of FORMAT_VARIANTS) {
-      fullUrl.searchParams.set('_accept', format);
-      targets.push(fullUrl.toString());
-    }
-  }
+export const imageCacheKey = (origin: string, key: ImageCacheKeyParts): string =>
+  `${origin}/img/${key.id}?w=${key.width ?? 'orig'}&q=${key.quality}&_accept=${key.format}`;
 
-  targets.push(new URL('/api/images', base).toString());
-  return targets;
+/** The gallery's first photo-list page, the only list response kept in the edge cache. */
+export const GALLERY_FIRST_PAGE_PATH = '/api/images?limit=200';
+
+// Free-plan Workers allow 50 Cache API calls per request; calls past that fail.
+export const CACHE_API_CALL_BUDGET = 50;
+
+export const purgeImageCacheTargets = (id: string, origin: string) => {
+  const sizes: VariantSize[] = [ORIGINAL_SIZE, ...ALL_VARIANTS];
+  const cacheKeys = sizes.flatMap(({ width, quality }) =>
+    FORMAT_VARIANTS.map((format) => imageCacheKey(origin, { id, width, quality, format })),
+  );
+
+  return [mediaCacheKey(origin, id), ...new Set(cacheKeys), `${origin}${GALLERY_FIRST_PAGE_PATH}`];
 };

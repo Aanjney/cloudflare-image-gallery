@@ -3,10 +3,8 @@ import type { ImageMeta } from '../types';
 
 export const PRIVATE_NO_STORE = 'private, no-store';
 
-export const PUBLIC_IMAGE_CACHE =
-  'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800, immutable';
-
-export const MEDIA_NOT_MODIFIED_CACHE = 'public, max-age=86400, stale-while-revalidate=604800';
+// Image URLs never change bytes; s-maxage bounds how long other colos serve a deleted photo.
+export const PUBLIC_IMAGE_CACHE = 'public, max-age=31536000, s-maxage=86400, immutable';
 
 type R2ImageObject = {
   body: ReadableStream | null;
@@ -15,12 +13,11 @@ type R2ImageObject = {
   size?: number;
 };
 
-export const etagsMatch = (
-  ifNoneMatch: string | undefined,
-  etag: string | undefined,
-): boolean => {
+const WEAK_ETAG_PREFIX = /^W\//;
+
+export const etagsMatch = (ifNoneMatch: string | undefined, etag: string | undefined): boolean => {
   if (!etag || !ifNoneMatch) return false;
-  return ifNoneMatch.replace(/W\//, '') === etag.replace(/W\//, '');
+  return ifNoneMatch.replace(WEAK_ETAG_PREFIX, '') === etag.replace(WEAK_ETAG_PREFIX, '');
 };
 
 export const notFoundResponse = (secure = false): Response => {
@@ -30,6 +27,12 @@ export const notFoundResponse = (secure = false): Response => {
   );
   return secure ? addSecurityHeaders(resp) : resp;
 };
+
+export const indexUnavailableResponse = (): Response =>
+  Response.json(
+    { error: 'Index unavailable' },
+    { status: 503, headers: { 'Cache-Control': PRIVATE_NO_STORE } },
+  );
 
 export const notModifiedResponse = (
   etag: string,
@@ -55,7 +58,6 @@ export const buildR2ImageResponse = (
   const headers = new Headers();
   headers.set('Content-Type', meta.contentType || 'image/jpeg');
   headers.set('Cache-Control', PUBLIC_IMAGE_CACHE);
-  headers.set('Vary', 'Accept');
   headers.set('ETag', r2ObjectEtag(obj, meta));
   if (typeof obj.size === 'number') headers.set('Content-Length', String(obj.size));
   return new Response(obj.body, { headers });

@@ -32,6 +32,17 @@ export const requireAdminAuth = async (c: Context<{ Bindings: Env }>, next: Next
     );
   }
 
+  const audience = c.env.ACCESS_AUD?.trim();
+  if (!audience) {
+    return c.json(
+      {
+        error: 'Unauthorized',
+        message: 'Set ACCESS_AUD to your Cloudflare Access application AUD tag.',
+      },
+      401,
+    );
+  }
+
   const token = c.req.header('Cf-Access-Jwt-Assertion') ?? c.req.header('cf-access-jwt-assertion');
   if (!token) {
     return c.json(
@@ -46,7 +57,7 @@ export const requireAdminAuth = async (c: Context<{ Bindings: Env }>, next: Next
 
   const result = await verifyAccessJwt(token, {
     teamDomain,
-    audience: c.env.ACCESS_AUD,
+    audience,
   });
 
   if (!result.ok) {

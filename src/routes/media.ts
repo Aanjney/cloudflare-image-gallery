@@ -1,107 +1,127 @@
-import { buildCacheKey, getEdgeCache } from '../app/cache';
+import { formatPref, getEdgeCache, putWhileIndexed } from '../app/cache';
 import {
-  MEDIA_NOT_MODIFIED_CACHE,
+  PRIVATE_NO_STORE,
   PUBLIC_IMAGE_CACHE,
   buildR2ImageResponse,
   buildTransformedImageResponse,
   etagsMatch,
+  indexUnavailableResponse,
   notFoundResponse,
   notModifiedResponse,
   r2ObjectEtag,
 } from '../app/mediaResponse';
+import { retry, withTimeout } from '../app/retry';
 import { addSecurityHeaders } from '../app/security';
-import { getIndexStub, type GalleryApp } from '../app/worker';
-import type { Env, ImageMeta } from '../types';
+import { getImageMeta, type GalleryApp } from '../app/worker';
+import { imageCacheKey, mediaCacheKey, snapVariant } from '../domain/imageVariants';
+import type { Env } from '../types';
 
-const buildImageOrigin = (env: Env, key: string) => {
-  if (env.R2_PUBLIC_HOST) {
-    return `https://${env.R2_PUBLIC_HOST.replace(/\/+$/, '')}/${key}`;
-  }
-  return null;
+const TRAILING_SLASHES = /\/+$/;
+
+const buildImageOrigin = (env: Env, key: string) =>
+  env.R2_PUBLIC_HOST ? `https://${env.R2_PUBLIC_HOST.replace(TRAILING_SLASHES, '')}/${key}` : null;
+
+const numberParam = (raw: string | undefined): number | undefined => {
+  const n = Number(raw);
+  return raw && n && Number.isFinite(n) ? n : undefined;
 };
+
+const RESIZE_TIMEOUT_MS = 15000;
+
+const getR2Object = (env: Env, key: string) =>
+  retry(() => withTimeout(env.IMAGES_BUCKET.get(key), 5000, 'R2 get'), {
+    attempts: 2,
+    baseMs: 100,
+    capMs: 1000,
+  });
+
+const stillIndexed = (env: Env, id: string) => async () => (await getImageMeta(env, id)).ok;
 
 export const registerMediaRoutes = (app: GalleryApp) => {
   app.get('/media/:id', async (c) => {
     const cache = getEdgeCache();
-    const cacheReq = new Request(c.req.url);
-    const cached = await cache.match(cacheReq);
-    if (cached) return cached;
-
     const id = c.req.param('id');
-    const stub = getIndexStub(c.env);
-    const metaResp = await stub.fetch(`https://index/meta/${id}`);
-    if (!metaResp.ok) return notFoundResponse();
+    const cacheReq = new Request(mediaCacheKey(new URL(c.req.url).origin, id));
+    const cached = await cache.match(cacheReq);
+    if (cached) {
+      const cachedEtag = cached.headers.get('ETag');
+      return cachedEtag && etagsMatch(c.req.header('if-none-match'), cachedEtag)
+        ? notModifiedResponse(cachedEtag, PUBLIC_IMAGE_CACHE)
+        : cached;
+    }
 
-    const meta = (await metaResp.json()) as ImageMeta;
-    const obj = await c.env.IMAGES_BUCKET.get(meta.key);
+    const found = await getImageMeta(c.env, id);
+    if (!found.ok) return found.notFound ? notFoundResponse() : indexUnavailableResponse();
+
+    const meta = found.data;
+    const obj = await getR2Object(c.env, meta.key);
     if (!obj || !obj.body) return notFoundResponse(true);
 
     const etag = r2ObjectEtag(obj, meta);
     if (etagsMatch(c.req.header('if-none-match'), etag)) {
-      return notModifiedResponse(etag, MEDIA_NOT_MODIFIED_CACHE);
+      return notModifiedResponse(etag, PUBLIC_IMAGE_CACHE);
     }
 
     const resp = addSecurityHeaders(buildR2ImageResponse(obj, meta));
-    c.executionCtx?.waitUntil(cache.put(cacheReq, resp.clone()));
+    c.executionCtx.waitUntil(
+      putWhileIndexed(cache, cacheReq, resp.clone(), stillIndexed(c.env, id)),
+    );
     return resp;
   });
 
   app.get('/img/:id', async (c) => {
     const cache = getEdgeCache();
-    const accept = c.req.header('accept');
-    const edgeKey = buildCacheKey(c.req.url, accept);
-    const cached = await cache.match(edgeKey);
-    if (cached) return cached;
-
     const id = c.req.param('id');
-    const width = c.req.query('w');
-    const quality = c.req.query('q');
-    const format = c.req.query('fmt');
-    const dprRaw = c.req.header('sec-ch-dpr') || '';
-    const dpr = Number(dprRaw) || 1;
+    const { width, quality } = snapVariant(
+      numberParam(c.req.query('w')),
+      numberParam(c.req.query('q')),
+    );
+    const format = c.req.query('fmt') === 'webp' ? 'webp' : formatPref(c.req.header('accept'));
+    const origin = new URL(c.req.url).origin;
 
-    const stub = getIndexStub(c.env);
-    const metaResp = await stub.fetch(`https://index/meta/${id}`);
-    if (!metaResp.ok) return notFoundResponse();
+    const edgeKey = new Request(imageCacheKey(origin, { id, width, quality, format }));
+    const cached = await cache.match(edgeKey);
+    if (cached) {
+      const cachedEtag = cached.headers.get('ETag');
+      return cachedEtag && etagsMatch(c.req.header('if-none-match'), cachedEtag)
+        ? notModifiedResponse(cachedEtag, PUBLIC_IMAGE_CACHE, { Vary: 'Accept' })
+        : cached;
+    }
 
-    const meta = (await metaResp.json()) as ImageMeta;
+    const found = await getImageMeta(c.env, id);
+    if (!found.ok) return found.notFound ? notFoundResponse() : indexUnavailableResponse();
+    const meta = found.data;
 
-    const origin = buildImageOrigin(c.env, meta.key) || `${new URL(c.req.url).origin}/media/${id}`;
+    const effectiveWidth = width && Math.min(width, meta.width || width);
+    const imageOpts = { width: effectiveWidth, quality, format };
 
-    const imageOpts: Record<string, unknown> = {};
-    const requested = width ? Number(width) || undefined : undefined;
-    const effectiveWidth = requested
-      ? Math.round(Math.min(requested * Math.min(dpr, 2), meta.width || requested))
-      : undefined;
-    if (effectiveWidth) imageOpts.width = effectiveWidth;
-    imageOpts.quality = quality ? Number(quality) || undefined : 85;
-    imageOpts.format = format || 'auto';
-
-    const cacheTag = `img-${id}-w${imageOpts.width || 'orig'}-q${imageOpts.quality || ''}-${imageOpts.format || ''}`;
-    const etag = `"v-${id}-${imageOpts.width || 'orig'}-${imageOpts.quality || ''}-${imageOpts.format || ''}"`;
+    const etag = `"v-${id}-${effectiveWidth || 'orig'}-${quality}-${format}"`;
     if (etagsMatch(c.req.header('if-none-match'), etag)) {
       return notModifiedResponse(etag, PUBLIC_IMAGE_CACHE, { Vary: 'Accept' });
     }
 
-    const resp = await fetch(origin, {
+    const resp = await fetch(buildImageOrigin(c.env, meta.key) || `${origin}/media/${id}`, {
+      signal: AbortSignal.timeout(RESIZE_TIMEOUT_MS),
       cf: {
         image: imageOpts,
         cacheEverything: true,
         cacheTtl: 86400,
-        cacheKey: cacheTag,
+        cacheKey: `img-${id}-w${effectiveWidth || 'orig'}-q${quality}-${format}`,
       },
-    });
+    }).catch(() => null);
 
-    if (!resp.ok) {
-      const obj = await c.env.IMAGES_BUCKET.get(meta.key);
+    if (!resp?.ok) {
+      const obj = await getR2Object(c.env, meta.key);
       if (!obj?.body) return notFoundResponse(true);
       const fallback = addSecurityHeaders(buildR2ImageResponse(obj, meta));
-      c.executionCtx?.waitUntil(cache.put(edgeKey, fallback.clone()));
+      fallback.headers.set('Cache-Control', PRIVATE_NO_STORE);
       return fallback;
     }
 
     const final = addSecurityHeaders(buildTransformedImageResponse(resp, etag));
-    c.executionCtx?.waitUntil(cache.put(edgeKey, final.clone()));
+    c.executionCtx.waitUntil(
+      putWhileIndexed(cache, edgeKey, final.clone(), stillIndexed(c.env, id)),
+    );
     return final;
   });
 };
