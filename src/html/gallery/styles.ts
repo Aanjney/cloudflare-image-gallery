@@ -1,20 +1,22 @@
 export function buildGalleryStyles(): string {
   return `<style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
 
 /* ── Theme tokens ── */
 :root,[data-theme="dark"]{
   --bg:#000;--surface:#0a0a0a;--surface-high:#111;
-  --text:#fff;--text-dim:rgba(255,255,255,0.4);--text-muted:rgba(255,255,255,0.25);
+  --text:#fff;--text-dim:rgba(255,255,255,0.5);--text-muted:rgba(255,255,255,0.25);
   --nav-bg:rgba(0,0,0,0.80);--border:rgba(255,255,255,0.05);
   --carousel-bg:#131313;
+  color-scheme:dark;
 }
 [data-theme="light"]{
   --bg:#f5f3f0;--surface:#eae7e3;--surface-high:#ddd9d4;
-  --text:#1a1a1a;--text-dim:rgba(0,0,0,0.45);--text-muted:rgba(0,0,0,0.2);
+  --text:#1a1a1a;--text-dim:rgba(0,0,0,0.6);--text-muted:rgba(0,0,0,0.2);
   --nav-bg:rgba(245,243,240,0.85);--border:rgba(0,0,0,0.08);
   --carousel-bg:#f5f3f0;
+  color-scheme:light;
 }
 
 body{
@@ -54,10 +56,9 @@ body{
 .nav-actions{display:flex;align-items:center;gap:2rem}
 .theme-toggle,.github-link{
   background:none;border:none;cursor:pointer;padding:0;
-  color:var(--text-dim);transition:color 0.3s;font-size:0;line-height:1;
+  color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
   display:inline-flex;align-items:center;
 }
-.theme-toggle:hover,.github-link:hover{color:var(--text)}
 .theme-toggle .material-symbols-outlined{font-size:20px}
 .github-link svg{width:20px;height:20px;fill:currentColor}
 .icon-dark,.icon-light{display:none}
@@ -71,7 +72,7 @@ body{
 }
 .hero-title{
   font-family:'Epilogue',sans-serif;
-  font-size:clamp(2.5rem,10vw,8rem);
+  font-size:clamp(1.75rem,9vw,8rem);
   line-height:0.85;font-weight:900;
   letter-spacing:-0.04em;text-transform:uppercase;color:var(--text);
   margin-bottom:1.5rem;transition:color 0.4s;
@@ -104,27 +105,30 @@ body{
   position:relative;z-index:2;
 }
 .masonry-item img.loaded{opacity:1}
-.masonry-item:hover img{transform:scale(1.05)}
 .caption p{
   font-family:'Epilogue',sans-serif;font-size:0.6rem;
   text-transform:uppercase;letter-spacing:0.15em;
   color:var(--text);font-weight:700;transition:color 0.4s;
 }
+.gallery-message{
+  column-span:all;text-align:center;padding:2rem 0;
+  font-family:'Inter',sans-serif;font-size:0.875rem;color:var(--text-dim);
+}
 #sentinel{height:2px}
 
 /* ── Carousel / Lightbox ── */
 .carousel{
-  position:fixed;inset:0;z-index:100;background:var(--carousel-bg);
-  display:none;flex-direction:column;align-items:center;justify-content:center;
+  position:fixed;inset:0;z-index:100;background:var(--carousel-bg);color:var(--text);
+  border:0;padding:0;margin:0;width:100%;height:100%;max-width:none;max-height:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
   overflow:hidden;transition:background 0.4s;
 }
-.carousel.open{display:flex}
+.carousel:not([open]){display:none}
 .carousel-nav-btn{
   position:absolute;top:50%;transform:translateY(-50%);z-index:110;
   background:none;border:none;cursor:pointer;padding:1rem;
-  color:var(--text-muted);transition:color 0.3s;
+  color:var(--text-dim);transition:color 0.15s ease-out;
 }
-.carousel-nav-btn:hover{color:var(--text)}
 .carousel-nav-btn .material-symbols-outlined{
   font-size:2.5rem;
   font-variation-settings:'FILL' 0,'wght' 200,'GRAD' 0,'opsz' 48;
@@ -135,9 +139,8 @@ body{
 .carousel-close{
   position:absolute;top:1.5rem;right:2rem;z-index:110;
   background:none;border:none;cursor:pointer;
-  color:var(--text-dim);transition:color 0.3s;font-size:0;line-height:1;
+  color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
 }
-.carousel-close:hover{color:var(--text)}
 .carousel-close .material-symbols-outlined{font-size:24px}
 .carousel-content{
   width:100%;max-width:1400px;padding:5rem 2rem 2rem;
@@ -163,7 +166,7 @@ body{
   margin-top:1.5rem;
   font-family:'Inter',sans-serif;font-size:0.625rem;
   text-transform:uppercase;letter-spacing:0.3em;
-  color:var(--text-muted);font-weight:700;transition:color 0.4s;
+  color:var(--text-dim);font-weight:700;font-variant-numeric:tabular-nums;transition:color 0.4s;
 }
 .carousel-divider{width:2rem;height:1px;background:var(--text-muted);margin:0.75rem auto 0;transition:background 0.4s}
 
@@ -176,43 +179,63 @@ body{
 .footer-brand{
   font-family:'Epilogue',sans-serif;font-size:0.65rem;
   letter-spacing:0.4em;text-transform:uppercase;
-  color:var(--text-muted);font-weight:600;transition:color 0.4s;
+  color:var(--text-dim);font-weight:600;transition:color 0.4s;
 }
 .footer-links{display:flex;gap:3rem}
 .footer-links a,.footer-links button{
   font-family:'Epilogue',sans-serif;font-size:0.7rem;
   text-transform:uppercase;letter-spacing:0.2em;font-weight:700;
   color:var(--text-dim);text-decoration:none;background:none;border:none;cursor:pointer;
-  transition:all 0.3s;text-underline-offset:0.5rem;padding:0;
+  transition:color 0.15s ease-out;text-underline-offset:0.5rem;padding:0;
 }
-.footer-links a:hover,.footer-links button:hover{color:var(--text);text-decoration:underline}
 .footer-copyright{
   font-family:'Inter',sans-serif;font-size:0.6rem;
-  letter-spacing:0.1em;color:var(--text-muted);
+  letter-spacing:0.1em;color:var(--text-dim);
   transition:color 0.4s;
 }
 .email-toast{
-  position:fixed;bottom:-5rem;left:50%;transform:translateX(-50%);z-index:200;
+  position:fixed;bottom:2rem;left:50%;z-index:200;
+  transform:translate(-50%,0);visibility:hidden;
   display:flex;align-items:center;gap:1rem;
   background:var(--surface-high);border:1px solid var(--border);
-  padding:1rem 1.5rem;
+  padding:1rem 1.5rem;width:max-content;max-width:calc(100% - 2rem);
   backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
-  transition:bottom 0.4s cubic-bezier(0.16,1,0.3,1);
 }
-.email-toast.visible{bottom:2rem}
+.email-toast.visible{visibility:visible}
+@media(prefers-reduced-motion:no-preference){
+  .email-toast{
+    transform:translate(-50%,1rem);
+    transition:transform 0.4s cubic-bezier(0.16,1,0.3,1),visibility 0s 0.4s;
+  }
+  .email-toast.visible{
+    transform:translate(-50%,0);
+    transition:transform 0.4s cubic-bezier(0.16,1,0.3,1),visibility 0s;
+  }
+}
 .email-toast-addr{
   font-family:'Inter',sans-serif;font-size:0.875rem;font-weight:500;
-  color:var(--text);letter-spacing:0.02em;user-select:all;
+  color:var(--text);letter-spacing:0.02em;user-select:all;overflow-wrap:anywhere;
 }
 .email-toast-copy{
   background:none;border:none;cursor:pointer;color:var(--text-dim);
-  transition:color 0.3s;padding:0;font-size:0;line-height:1;
+  transition:color 0.15s ease-out;padding:0;font-size:0;line-height:1;
 }
-.email-toast-copy:hover{color:var(--text)}
 .email-toast-copy .material-symbols-outlined{font-size:18px}
 .email-toast-label{
   font-family:'Inter',sans-serif;font-size:0.625rem;
-  color:var(--text-muted);letter-spacing:0.1em;text-transform:uppercase;
+  color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;
+}
+
+/* ── Hover (only on devices with a real pointer) ── */
+@media(hover:hover){
+  .theme-toggle:hover,.github-link:hover{color:var(--text)}
+  .carousel-nav-btn:hover{color:var(--text)}
+  .carousel-close:hover{color:var(--text)}
+  .footer-links a:hover,.footer-links button:hover{color:var(--text);text-decoration:underline}
+  .email-toast-copy:hover{color:var(--text)}
+}
+@media(hover:hover) and (prefers-reduced-motion:no-preference){
+  .masonry-item:hover img{transform:scale(1.05)}
 }
 </style>`;
 }
