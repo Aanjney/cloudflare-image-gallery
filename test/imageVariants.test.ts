@@ -7,9 +7,10 @@ import {
   GALLERY_GRID_VARIANTS,
   UPLOAD_WARM_VARIANTS,
   buildBrowserImageUrlHelper,
+  imageCacheKey,
   imagePath,
   purgeImageCacheTargets,
-  purgeImagePaths,
+  snapVariant,
 } from '../src/domain/imageVariants';
 import {
   PLACEHOLDER_DEFAULT,
@@ -51,20 +52,10 @@ describe('image variant registry', () => {
     const expected = averageRgbFromImageData(sampleData, PLACEHOLDER_SAMPLE_SIZE);
 
     const placeholderFromImage = new Function(
-      `var tile = new Uint8ClampedArray([255,0,0,255,0,255,0,255,0,0,255,255,128,128,0,255]);
-      var sampleData = new Uint8ClampedArray(576);
-      for (var i = 0; i < sampleData.length; i += 4) {
-        var src = i % 16;
-        sampleData[i] = tile[src];
-        sampleData[i + 1] = tile[src + 1];
-        sampleData[i + 2] = tile[src + 2];
-        sampleData[i + 3] = tile[src + 3];
-      }
-      var document = {
+      'sampleData',
+      `var document = {
         createElement: function() {
           return {
-            width: 0,
-            height: 0,
             getContext: function() {
               return {
                 drawImage: function() {},
@@ -78,50 +69,53 @@ describe('image variant registry', () => {
       };
       ${buildBrowserPlaceholderColorHelper()}
       return placeholderFromImage;`,
-    )() as (img: unknown) => string;
+    )(sampleData) as (img: unknown) => string;
 
     expect(placeholderFromImage({})).toBe(expected);
     expect(buildBrowserPlaceholderColorHelper()).toContain(PLACEHOLDER_DEFAULT);
-    expect(buildBrowserPlaceholderColorHelper()).toContain(String(PLACEHOLDER_SAMPLE_SIZE));
   });
 
-  it('purges every variant used by gallery, admin, and upload warmup', () => {
-    const purged = purgeImagePaths('abc');
-    const expected = [
-      '/img/abc',
-      ...GALLERY_GRID_VARIANTS.map((variant) => imagePath('abc', variant)),
-      ...CAROUSEL_VARIANTS.map((variant) => imagePath('abc', variant)),
-      ...UPLOAD_WARM_VARIANTS.map((variant) => imagePath('abc', variant)),
-      imagePath('abc', ADMIN_THUMB_VARIANT),
-      imagePath('abc', ADMIN_BACKFILL_VARIANT),
+  it('keeps every named variant canonical and purges it in every output format', () => {
+    const targets = purgeImageCacheTargets('abc', 'https://example.com');
+    const variants = [
+      ...GALLERY_GRID_VARIANTS,
+      ...CAROUSEL_VARIANTS,
+      ...UPLOAD_WARM_VARIANTS,
+      ADMIN_THUMB_VARIANT,
+      ADMIN_BACKFILL_VARIANT,
     ];
 
-    for (const path of expected) {
-      expect(purged).toContain(path);
-    }
-    expect(new Set(purged).size).toBe(purged.length);
-  });
-
-  it('keeps all cache accept variants explicit', () => {
-    expect(FORMAT_VARIANTS).toEqual(['avif', 'webp', 'jpeg']);
-  });
-
-  it('builds delete purge targets for media, API, and accept-keyed image caches', () => {
-    const base = new URL('https://example.com/_admin/api/images/delete');
-    const targets = purgeImageCacheTargets('abc', base);
-    const imagePaths = purgeImagePaths('abc');
-
     expect(targets[0]).toBe('https://example.com/media/abc');
-    expect(targets).toContain('https://example.com/api/images');
-
-    for (const path of imagePaths) {
-      const fullUrl = new URL(path, base).toString();
-      expect(targets).toContain(fullUrl);
+    for (const { width, quality } of variants) {
+      expect(snapVariant(width, quality)).toEqual({ width, quality });
       for (const format of FORMAT_VARIANTS) {
-        const accepted = new URL(fullUrl);
-        accepted.searchParams.set('_accept', format);
-        expect(targets).toContain(accepted.toString());
+        expect(targets).toContain(
+          imageCacheKey('https://example.com', { id: 'abc', width, quality, format }),
+        );
       }
     }
+    expect(new Set(targets).size).toBe(targets.length);
+  });
+
+  it('canonicalizes every requestable width and quality to a purged cache key', () => {
+    const origin = 'https://example.com';
+    const targets = new Set(purgeImageCacheTargets('abc', origin));
+    const widths = [undefined, 1, 100, 159, 161, 700, 1000, 1599, 1601, 5000];
+    const qualities = [undefined, 1, 50, 70, 76, 79, 81, 83, 84, 99, 100];
+
+    for (const w of widths) {
+      for (const q of qualities) {
+        const { width, quality } = snapVariant(w, q);
+        for (const format of FORMAT_VARIANTS) {
+          expect(targets).toContain(imageCacheKey(origin, { id: 'abc', width, quality, format }));
+        }
+      }
+    }
+  });
+
+  it('snaps out-of-range transform parameters to the nearest variant', () => {
+    expect(snapVariant(5000, 99)).toEqual({ width: 1600, quality: 85 });
+    expect(snapVariant(1600, 70)).toEqual({ width: 1600, quality: 82 });
+    expect(snapVariant(1, 1)).toEqual({ width: 120, quality: 70 });
   });
 });

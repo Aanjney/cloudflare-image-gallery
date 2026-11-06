@@ -1,11 +1,44 @@
 import { Env, ImageMeta, ListResponse, StatsResponse } from '../types';
 
-type AddPayload = ImageMeta;
-
 const ORDER_KEY = 'order';
 const META_PREFIX = 'meta:';
+// The order is one storage value. SQLite-backed objects allow 2 MB per key plus value,
+// and 5000 UUIDs serialize to about 190 KB.
 export const ORDER_LIMIT = 5000;
 const META_READ_BATCH = 128;
+// The cursor keeps the last few ids served, so a page resumes after the newest one that
+// still exists. The offset is only a fallback for when all of them were deleted.
+const CURSOR_ANCHOR_IDS = 5;
+
+type ListCursor = { after: string[]; offset: number };
+
+const encodeCursor = (cursor: ListCursor): string => btoa(JSON.stringify(cursor));
+
+const decodeCursor = (raw: string | null): ListCursor => {
+  const empty: ListCursor = { after: [], offset: 0 };
+  if (!raw) return empty;
+  try {
+    const decoded = JSON.parse(atob(raw)) as Partial<ListCursor>;
+    const after = Array.isArray(decoded.after)
+      ? decoded.after.filter((id): id is string => typeof id === 'string')
+      : [];
+    const offset =
+      typeof decoded.offset === 'number' && Number.isInteger(decoded.offset) && decoded.offset > 0
+        ? decoded.offset
+        : 0;
+    return { after, offset };
+  } catch {
+    return empty;
+  }
+};
+
+const resumeIndex = (source: string[], cursor: ListCursor): number => {
+  for (const id of cursor.after) {
+    const i = source.indexOf(id);
+    if (i !== -1) return i + 1;
+  }
+  return cursor.offset;
+};
 
 export class ImageIndex {
   private readonly state: DurableObjectState;
@@ -46,14 +79,10 @@ export class ImageIndex {
   }
 
   private async handleAdd(request: Request) {
-    let payload: AddPayload;
-    try {
-      payload = (await request.json()) as AddPayload;
-    } catch (_e) {
-      return new Response('Invalid JSON', { status: 400 });
-    }
+    const payload = await this.readJson<ImageMeta>(request);
+    if (!payload) return new Response('Invalid JSON', { status: 400 });
 
-    if (!payload?.id || !payload.key || !payload.createdAt) {
+    if (!payload.id || !payload.key || !payload.createdAt) {
       return new Response('Missing required fields', { status: 400 });
     }
 
@@ -74,7 +103,7 @@ export class ImageIndex {
       year: payload.year,
     };
 
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const order = await this.getOrder();
     const isExisting = order.includes(meta.id);
     if (!isExisting && order.length >= ORDER_LIMIT) {
       return new Response('Index at capacity', { status: 409 });
@@ -91,7 +120,7 @@ export class ImageIndex {
   }
 
   private async handleStats() {
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const order = await this.getOrder();
     const metaById = await this.getMetaById(order);
     let total = 0;
     let totalBytes = 0;
@@ -123,21 +152,7 @@ export class ImageIndex {
 
     const limit = Math.min(500, Math.max(1, limitParam ? Number(limitParam) || 20 : 20));
 
-    let offset = 0;
-    if (cursorParam) {
-      try {
-        const decoded = JSON.parse(
-          new TextDecoder().decode(Uint8Array.from(atob(cursorParam), (c) => c.charCodeAt(0))),
-        );
-        if (typeof decoded.offset === 'number') {
-          offset = decoded.offset;
-        }
-      } catch (_e) {
-        // Ignore bad cursor and fall back to 0.
-      }
-    }
-
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const order = await this.getOrder();
 
     let listSource = order;
     let metaById: Map<string, ImageMeta> | null = null;
@@ -151,27 +166,24 @@ export class ImageIndex {
       });
     }
 
+    const offset = resumeIndex(listSource, decodeCursor(cursorParam));
     const slice = listSource.slice(offset, offset + limit);
     if (!metaById) metaById = await this.getMetaById(slice);
 
-    const items = slice
-      .map((id) => metaById.get(id))
-      .filter((m): m is ImageMeta => Boolean(m));
+    const items = slice.map((id) => metaById.get(id)).filter((m): m is ImageMeta => Boolean(m));
     const nextOffset = offset + slice.length;
     const nextCursor =
-      nextOffset < listSource.length ? btoa(JSON.stringify({ offset: nextOffset })) : null;
+      nextOffset < listSource.length
+        ? encodeCursor({ after: slice.slice(-CURSOR_ANCHOR_IDS).reverse(), offset: nextOffset })
+        : null;
 
     const body: ListResponse = { items, cursor: nextCursor };
     return Response.json(body);
   }
 
   private async handleUpdate(request: Request) {
-    let payload: Partial<ImageMeta> & { id?: string };
-    try {
-      payload = (await request.json()) as Partial<ImageMeta> & { id?: string };
-    } catch (_e) {
-      return new Response('Invalid JSON', { status: 400 });
-    }
+    const payload = await this.readJson<Partial<ImageMeta>>(request);
+    if (!payload) return new Response('Invalid JSON', { status: 400 });
     if (!payload.id) return new Response('Missing id', { status: 400 });
 
     const metaKey = `${META_PREFIX}${payload.id}`;
@@ -202,19 +214,15 @@ export class ImageIndex {
   }
 
   private async handleDelete(request: Request) {
-    let payload: { id?: string };
-    try {
-      payload = (await request.json()) as { id?: string };
-    } catch (_e) {
-      return new Response('Invalid JSON', { status: 400 });
-    }
+    const payload = await this.readJson<{ id?: string }>(request);
+    if (!payload) return new Response('Invalid JSON', { status: 400 });
     if (!payload.id) return new Response('Missing id', { status: 400 });
 
     const metaKey = `${META_PREFIX}${payload.id}`;
     const meta = await this.state.storage.get<ImageMeta>(metaKey);
     if (!meta) return new Response('Not found', { status: 404 });
 
-    const order = ((await this.state.storage.get<string[]>(ORDER_KEY)) ?? []) as string[];
+    const order = await this.getOrder();
     const newOrder = order.filter((i) => i !== payload.id);
 
     await Promise.all([
@@ -223,6 +231,19 @@ export class ImageIndex {
     ]);
 
     return Response.json({ ok: true, removed: payload.id });
+  }
+
+  private async getOrder(): Promise<string[]> {
+    return (await this.state.storage.get<string[]>(ORDER_KEY)) ?? [];
+  }
+
+  // Only this Worker calls the index, so the payload shape is trusted.
+  private async readJson<T>(request: Request): Promise<T | null> {
+    try {
+      return (await request.json()) as T;
+    } catch {
+      return null;
+    }
   }
 
   private async getMetaById(ids: string[]): Promise<Map<string, ImageMeta>> {

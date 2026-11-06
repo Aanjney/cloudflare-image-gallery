@@ -14,7 +14,7 @@ export const averageRgbFromImageData = (data: Uint8ClampedArray, sampleSize: num
   return `rgb(${Math.round(r / pixels)},${Math.round(g / pixels)},${Math.round(b / pixels)})`;
 };
 
-/** JS snippet defining `placeholderFromImage(img)` — must stay aligned with `averageRgbFromImageData`. */
+/** JS snippet defining `placeholderFromImage(img)`. It must stay aligned with `averageRgbFromImageData`. */
 export const buildBrowserPlaceholderColorHelper = () =>
   `var PLACEHOLDER_DEFAULT = '${PLACEHOLDER_DEFAULT}';
   var PLACEHOLDER_SAMPLE_SIZE = ${PLACEHOLDER_SAMPLE_SIZE};
