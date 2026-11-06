@@ -1,19 +1,37 @@
-import { ALLOWED_UPLOAD_MIME_TYPES } from '../domain/uploadPolicy';
+import { ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_LABEL } from '../domain/uploadPolicy';
 
 export function buildAdminUploadScript(): string {
   const allowedUploadTypes = JSON.stringify(ALLOWED_UPLOAD_MIME_TYPES);
+  const maxUploadLabel = JSON.stringify(MAX_UPLOAD_LABEL);
 
   return `  /* ── Upload ── */
-  var queueList = qs('queueList');
-  var dropArea = qs('dropArea');
-  var filePicker = qs('filePicker');
-  var clearQueueBtn = qs('clearQueue');
-  var startUploadBtn = qs('startUpload');
-  var queueCountEl = qs('queueCount');
-  var uploadStatus = qs('uploadStatus');
+  var queueList = byId('queueList');
+  var dropArea = byId('dropArea');
+  var filePicker = byId('filePicker');
+  var clearQueueBtn = byId('clearQueue');
+  var startUploadBtn = byId('startUpload');
+  var queueCountEl = byId('queueCount');
+  var uploadStatus = byId('uploadStatus');
   var queue = [];
+  var uploading = false;
+  var queueGeneration = 0;
+  var isError = function(item){ return item.status === 'Error'; };
   var thumbUrl = function(id){ return imageUrl(id, ADMIN_THUMB_VARIANT); };
   var originalUrl = function(id){ return '/media/' + id; };
+  var isPending = function(item){ return item.status === 'Queued' || item.status === 'Uploading'; };
+  var revokePreview = function(item){ if (item.preview) URL.revokeObjectURL(item.preview); };
+  var newUploadId = function(){
+    if (crypto.randomUUID) return crypto.randomUUID();
+    var b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    var hex = '';
+    for (var i = 0; i < 16; i++) {
+      hex += (b[i] + 256).toString(16).slice(1);
+      if (i === 3 || i === 5 || i === 7 || i === 9) hex += '-';
+    }
+    return hex;
+  };
 
   var renderQueue = function(){
     queueList.innerHTML = '';
@@ -21,11 +39,11 @@ export function buildAdminUploadScript(): string {
     if (!queue.length) {
       var empty = document.createElement('div');
       empty.className = 'empty-state';
-      empty.textContent = 'No files queued yet. Drag images above or click to select.';
+      empty.textContent = 'No photos queued yet. Drag photos above or choose files.';
       queueList.appendChild(empty);
       return;
     }
-    queue.forEach(function(item, idx){
+    queue.forEach(function(item){
       var row = document.createElement('div');
       row.className = 'queue-item';
       var previewWrap = document.createElement('div');
@@ -45,9 +63,9 @@ export function buildAdminUploadScript(): string {
       var grid = document.createElement('div');
       grid.className = 'fields-grid';
       var mkField = function(label, field, placeholder, val) {
-        var g = document.createElement('div');
+        var g = document.createElement('label');
         g.className = 'field-group';
-        var l = document.createElement('label');
+        var l = document.createElement('span');
         l.textContent = label;
         g.appendChild(l);
         var inp = document.createElement('input');
@@ -55,12 +73,12 @@ export function buildAdminUploadScript(): string {
         inp.placeholder = placeholder || '';
         inp.value = val || '';
         inp.setAttribute('data-field', field);
-        inp.setAttribute('data-idx', String(idx));
+        inp.addEventListener('input', function(){ item[field] = inp.value; });
         g.appendChild(inp);
         return g;
       };
-      grid.appendChild(mkField('Camera Body', 'cameraBody', 'e.g. Leica M6', item.cameraBody));
-      grid.appendChild(mkField('Film Stock', 'filmStock', 'e.g. Kodak Portra 400', item.filmStock));
+      grid.appendChild(mkField('Camera body', 'cameraBody', 'e.g. Leica M6', item.cameraBody));
+      grid.appendChild(mkField('Film stock', 'filmStock', 'e.g. Kodak Portra 400', item.filmStock));
       grid.appendChild(mkField('Location', 'location', 'e.g. Faroe Islands', item.location));
       grid.appendChild(mkField('Year', 'year', 'e.g. 2024', item.year));
       fieldsWrap.appendChild(grid);
@@ -71,27 +89,33 @@ export function buildAdminUploadScript(): string {
         var badge = document.createElement('span');
         badge.className = 'status-badge';
         if (item.status === 'Done') badge.classList.add('done');
-        if (item.status.startsWith('Error')) badge.classList.add('error');
+        if (isError(item)) badge.classList.add('error');
         badge.textContent = item.status;
         if (item.message) badge.title = item.message;
         actions.appendChild(badge);
       }
-      var removeBtn = document.createElement('button');
-      removeBtn.className = 'btn-danger-text';
-      removeBtn.type = 'button';
-      removeBtn.innerHTML = '<span class="material-symbols-outlined">delete</span> Remove';
-      (function(i){ removeBtn.addEventListener('click', function(){ queue = queue.filter(function(_,ix){ return ix !== i; }); renderQueue(); }); })(idx);
-      actions.appendChild(removeBtn);
+      if (item.status !== 'Uploading') {
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-danger-text';
+        removeBtn.type = 'button';
+        removeBtn.innerHTML = '<span aria-hidden="true" class="material-symbols-outlined">delete</span> Remove';
+        removeBtn.addEventListener('click', function(){
+          queue = queue.filter(function(q){ return q !== item; });
+          revokePreview(item);
+          if (uploading) updateProgress();
+          renderQueue();
+        });
+        actions.appendChild(removeBtn);
+      }
       fieldsWrap.appendChild(actions);
+      if (item.message && isError(item)) {
+        var errText = document.createElement('div');
+        errText.className = 'error-text';
+        errText.textContent = item.message;
+        fieldsWrap.appendChild(errText);
+      }
       row.appendChild(fieldsWrap);
       queueList.appendChild(row);
-    });
-    queueList.querySelectorAll('input[data-field]').forEach(function(input){
-      input.addEventListener('input', function(){
-        var field = input.getAttribute('data-field');
-        var i = Number(input.getAttribute('data-idx'));
-        if (queue[i]) queue[i][field] = input.value;
-      });
     });
   };
 
@@ -125,16 +149,19 @@ export function buildAdminUploadScript(): string {
       uploadProgress.style.display = 'block';
       uploadLabel.textContent = 'Skipped';
       uploadStatus.className = 'upload-progress-status error';
-      uploadStatus.textContent = 'Unsupported format (only ' + UPLOAD_FORMAT_LABEL + '): ' + rejected.join(', ');
+      uploadStatus.textContent = 'Skipped ' + rejected.join(', ') + '. Only ' + UPLOAD_FORMAT_LABEL + ' files can be uploaded.';
     }
+    var generation = queueGeneration;
     Promise.all(valid.map(function(f){return getImageMeta(f);})).then(function(metas){
+      if (generation !== queueGeneration) return;
       metas.forEach(function(meta,i){
         queue.push({
-          file:valid[i], cameraBody:'', filmStock:'', location:'', year:'',
+          file:valid[i], uploadId:newUploadId(), cameraBody:'', filmStock:'', location:'', year:'',
           width:meta.width, height:meta.height, preview:meta.preview,
           placeholder:meta.placeholder, status:'Queued'
         });
       });
+      if (uploading) updateProgress();
       renderQueue();
     });
   };
@@ -145,56 +172,54 @@ export function buildAdminUploadScript(): string {
   dropArea.addEventListener('drop', function(e){ e.preventDefault(); dropArea.classList.remove('dragover'); if (e.dataTransfer&&e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
   filePicker.addEventListener('change', function(){ if (filePicker.files&&filePicker.files.length) addFiles(filePicker.files); });
   clearQueueBtn.addEventListener('click', function(){
-    queue=[]; uploadStatus.textContent=''; uploadProgress.style.display='none';
-    uploadTotal=0; uploadDone=0; uploadErrors=0; uploadFill.style.width='0%';
+    queueGeneration++;
+    queue = queue.filter(function(q){
+      if (q.status === 'Uploading') return true;
+      revokePreview(q);
+      return false;
+    });
+    if (uploading) updateProgress();
+    else { uploadStatus.textContent=''; uploadProgress.style.display='none'; uploadFill.style.transform='scaleX(0)'; }
     renderQueue();
   });
 
-  var uploadProgress = qs('uploadProgress');
-  var uploadLabel = qs('uploadLabel');
-  var uploadCount = qs('uploadCount');
-  var uploadFill = qs('uploadFill');
-  var uploadTotal = 0;
+  var uploadProgress = byId('uploadProgress');
+  var uploadLabel = byId('uploadLabel');
+  var uploadCount = byId('uploadCount');
+  var uploadFill = byId('uploadFill');
   var uploadDone = 0;
   var uploadErrors = 0;
-
-  var updateProgress = function(currentName) {
-    uploadProgress.style.display = 'block';
-    var pct = uploadTotal > 0 ? Math.round((uploadDone / uploadTotal) * 100) : 0;
-    uploadFill.style.width = pct + '%';
-    uploadCount.textContent = uploadDone + ' / ' + uploadTotal;
-    if (uploadDone < uploadTotal) {
-      uploadLabel.textContent = 'Uploading';
-      uploadStatus.className = 'upload-progress-status';
-      uploadStatus.textContent = currentName || '';
-    }
+  var uploadFraction = 0;
+  var MAX_UPLOAD_LABEL = ${maxUploadLabel};
+  var RETRY_HINT = ' Select Upload to archive to try again.';
+  var UPLOAD_ATTEMPTS = 3;
+  var UPLOAD_STALL_MS = 30000;
+  var UPLOAD_RESPONSE_MS = 60000;
+  var uploadErrorMessage = function(status, data){
+    if (status === 409) return data.error || 'The archive is full.';
+    if (status === 413) return 'This photo is over ' + MAX_UPLOAD_LABEL + '. Resize it, then add it again.';
+    if (status === 400) return 'This file isn’t a supported photo. Use ' + UPLOAD_FORMAT_LABEL + '.';
+    return 'The upload didn’t finish.' + RETRY_HINT;
   };
 
-  var uploadNext = function(){
-    var idx = -1;
-    for (var i=0;i<queue.length;i++){ if (queue[i].status==='Queued'){idx=i;break;} }
-    if (idx === -1){
-      uploadLabel.textContent = uploadErrors ? 'Completed with errors' : 'Complete';
-      uploadStatus.className = 'upload-progress-status ' + (uploadErrors ? 'error' : 'done');
-      uploadStatus.textContent = uploadErrors
-        ? uploadErrors + ' failed, ' + (uploadDone - uploadErrors) + ' uploaded'
-        : uploadDone + ' image' + (uploadDone !== 1 ? 's' : '') + ' uploaded successfully';
-      uploadFill.style.width = '100%';
-      queue=[]; renderQueue();
-      return;
-    }
-    var item = queue[idx];
-    queue[idx].status='Uploading'; renderQueue();
-    updateProgress(item.file.name);
+  var updateProgress = function() {
+    var total = uploadDone + queue.filter(isPending).length;
+    var current = queue.filter(function(q){ return q.status === 'Uploading'; })[0];
+    uploadProgress.style.display = 'block';
+    uploadFill.style.transform = 'scaleX(' + (total > 0 ? (uploadDone + uploadFraction) / total : 0) + ')';
+    uploadCount.textContent = uploadDone + ' / ' + total;
+    uploadLabel.textContent = 'Uploading';
+    uploadStatus.className = 'upload-progress-status';
+    uploadStatus.textContent = current ? current.file.name : '';
+  };
+  var setUploadFraction = function(fraction){ uploadFraction = fraction; updateProgress(); };
+
+  var buildUploadForm = function(item){
     var fd = new FormData();
     fd.append('file', item.file);
     fd.append('name', item.file.name);
-    var altParts = [];
-    if (item.filmStock) altParts.push(item.filmStock);
-    if (item.cameraBody) altParts.push(item.cameraBody);
-    if (item.location) altParts.push(item.location);
-    if (item.year) altParts.push(item.year);
-    fd.append('alt', altParts.length ? 'Film photograph' + (altParts.length ? ' \\u2014 ' + altParts.join(', ') : '') : item.file.name);
+    fd.append('uploadId', item.uploadId);
+    fd.append('alt', altFromMeta(item, item.file.name));
     if (item.width) fd.append('width', String(item.width));
     if (item.height) fd.append('height', String(item.height));
     if (item.placeholder) fd.append('placeholder', item.placeholder);
@@ -202,24 +227,106 @@ export function buildAdminUploadScript(): string {
     if (item.filmStock) fd.append('filmStock', item.filmStock.toUpperCase());
     if (item.location) fd.append('location', item.location.toUpperCase());
     if (item.year) fd.append('year', item.year.toUpperCase());
-    fetch(ADMIN+'/api/upload',{method:'POST',body:fd})
-      .then(function(resp){ return resp.json().catch(function(){return {};}).then(function(data){
-        uploadDone++;
-        if (!resp.ok||!data.ok){ queue[idx].status='Error'; queue[idx].message=data.error||'Upload failed'; uploadErrors++; }
-        else { queue[idx].status='Done'; queue[idx].message=(data.image&&data.image.id)||''; }
-        updateProgress('');
-        renderQueue(); uploadNext();
-      }); })
-      .catch(function(err){ uploadDone++; uploadErrors++; queue[idx].status='Error'; queue[idx].message=err&&err.message?err.message:String(err); updateProgress(''); renderQueue(); uploadNext(); });
+    return fd;
+  };
+
+  /* XHR rather than fetch: only XHR reports upload progress, which the stall timer needs. */
+  var sendUploadOnce = function(item){
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      var timer = null;
+      var watch = function(ms){
+        clearTimeout(timer);
+        timer = setTimeout(function(){ xhr.abort(); reject(new Error('Upload stalled')); }, ms);
+      };
+      xhr.open('POST', ADMIN + '/api/upload');
+      xhr.upload.onprogress = function(e){
+        if (e.lengthComputable && e.total) setUploadFraction(e.loaded / e.total);
+        watch(UPLOAD_STALL_MS);
+      };
+      xhr.upload.onload = function(){ setUploadFraction(1); watch(UPLOAD_RESPONSE_MS); };
+      xhr.onload = function(){
+        clearTimeout(timer);
+        var data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) {}
+        resolve({ status: xhr.status, data: data || {} });
+      };
+      xhr.onerror = function(){ clearTimeout(timer); reject(new Error('Network error')); };
+      setUploadFraction(0);
+      watch(UPLOAD_STALL_MS);
+      xhr.send(buildUploadForm(item));
+    });
+  };
+
+  /* Safe to retry because the server returns the existing photo for a repeated uploadId. */
+  var sendUpload = function(item){
+    var attempt = function(n){
+      var retry = function(result, isFailure){
+        if (n + 1 >= UPLOAD_ATTEMPTS) return isFailure ? Promise.reject(result) : result;
+        var delay = Math.random() * Math.min(8000, 1000 * Math.pow(2, n));
+        return new Promise(function(r){ setTimeout(r, delay); }).then(function(){ return attempt(n + 1); });
+      };
+      return sendUploadOnce(item).then(function(res){
+        return res.status >= 500 ? retry(res, false) : res;
+      }, function(err){ return retry(err, true); });
+    };
+    return attempt(0);
+  };
+
+  var failUpload = function(item, message){
+    item.status = 'Error';
+    item.message = message;
+    uploadErrors++;
+  };
+
+  var finishRun = function(){
+    uploading = false;
+    startUploadBtn.disabled = false;
+    uploadLabel.textContent = uploadErrors ? 'Completed with errors' : 'Complete';
+    uploadStatus.className = 'upload-progress-status ' + (uploadErrors ? 'error' : 'done');
+    uploadStatus.textContent = uploadErrors
+      ? uploadErrors + ' failed, ' + (uploadDone - uploadErrors) + ' uploaded. The failed photos are still in the queue.' + RETRY_HINT
+      : uploadDone + ' photo' + (uploadDone !== 1 ? 's' : '') + ' uploaded';
+    uploadFill.style.transform = 'scaleX(1)';
+    uploadCount.textContent = uploadDone + ' / ' + uploadDone;
+    queue = queue.filter(function(q){
+      if (q.status !== 'Done') return true;
+      revokePreview(q);
+      return false;
+    });
+    renderQueue();
+  };
+
+  var uploadNext = function(){
+    var item = queue.filter(function(q){ return q.status === 'Queued'; })[0];
+    if (!item) { finishRun(); return; }
+    item.status = 'Uploading';
+    renderQueue();
+    sendUpload(item).then(function(res){
+      if (res.status >= 200 && res.status < 300 && res.data.ok) {
+        item.status = 'Done';
+        item.message = (res.data.image && res.data.image.id) || '';
+      } else {
+        failUpload(item, uploadErrorMessage(res.status, res.data));
+      }
+    }, function(){
+      failUpload(item, 'The connection dropped during upload.' + RETRY_HINT);
+    }).then(function(){
+      uploadDone++;
+      uploadFraction = 0;
+      renderQueue();
+      uploadNext();
+    });
   };
 
   startUploadBtn.addEventListener('click', function(){
-    var pending = queue.filter(function(q){ return q.status === 'Queued' || q.status === 'Error'; });
-    if (!pending.length) return;
-    uploadTotal = pending.length;
+    if (uploading) return;
+    queue.forEach(function(q){ if (isError(q)) { q.status = 'Queued'; q.message = ''; } });
+    if (!queue.some(function(q){ return q.status === 'Queued'; })) return;
+    uploading = true;
+    startUploadBtn.disabled = true;
     uploadDone = 0;
     uploadErrors = 0;
-    updateProgress(pending[0].file.name);
     uploadNext();
   });`;
 }
