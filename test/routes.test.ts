@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import app from '../src/index';
 import { MAX_UPLOAD_BYTES, UPLOAD_FORMAT_LABEL } from '../src/domain/uploadPolicy';
-import type { Env, ImageMeta } from '../src/types';
-import { ORIGIN, type StubFetch, fakeNamespace } from './support/fakes';
+import type { ImageMeta } from '../src/domain/imageMeta';
+import type { Env } from '../src/types';
+import { ORIGIN, type StubFetch, fakeNamespace, indexWorld } from './support/fakes';
 
 class FakeImagesBucket {
   readonly putKeys: string[] = [];
@@ -113,11 +114,8 @@ describe('admin routes', () => {
 
     const response = await app.fetch(uploadRequest(), env);
 
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toMatchObject({
-      error: 'Failed to record metadata',
-      detail: 'DO unavailable',
-    });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Index unavailable' });
     expect(bucket.putKeys).toHaveLength(1);
     expect(bucket.putKeys[0]).toMatch(/^images\/.+\.png$/);
     expect(bucket.deleteKeys).toEqual(bucket.putKeys);
@@ -152,7 +150,7 @@ describe('admin routes', () => {
   it('keeps the index entry when every R2 delete attempt fails', async () => {
     const doFetch = deleteIndex(() => Response.json({ ok: true }));
     const { env, bucket } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
-    bucket.deleteFailures = 3;
+    bucket.deleteFailures = Infinity;
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const response = await app.fetch(deleteRequest(), env);
@@ -174,23 +172,15 @@ describe('secret admin path', () => {
   const secretEnv = () =>
     createEnv(undefined, { ADMIN_PATH: '/s3cret', ACCESS_BYPASS_DEV: 'true' }).env;
 
-  it('does not leak ADMIN_PATH when a client forges the rewrite header', async () => {
-    const response = await app.fetch(
-      new Request(`${ORIGIN}/_admin`, { headers: { 'x-gallery-admin-rewrite': '1' } }),
-      secretEnv(),
-      ctx,
-    );
+  it('answers /_admin with a 404, not a redirect to ADMIN_PATH', async () => {
+    const response = await app.fetch(new Request(`${ORIGIN}/_admin`), secretEnv(), ctx);
 
     expect(response.status).toBe(404);
     expect(response.headers.get('location')).toBeNull();
   });
 
-  it('does not serve /_admin/* when a client forges the rewrite header', async () => {
-    const response = await app.fetch(
-      new Request(`${ORIGIN}/_admin/ping`, { headers: { 'x-gallery-admin-rewrite': '1' } }),
-      secretEnv(),
-      ctx,
-    );
+  it('does not serve /_admin/* directly when ADMIN_PATH is set', async () => {
+    const response = await app.fetch(new Request(`${ORIGIN}/_admin/ping`), secretEnv(), ctx);
 
     expect(response.status).toBe(404);
   });
@@ -285,6 +275,28 @@ describe('admin image update', () => {
     });
   });
 
+  it('trims edited text fields', async () => {
+    const doFetch = vi.fn((_request: RequestInfo | URL, init?: RequestInit) =>
+      Response.json(imageMeta(JSON.parse(String(init?.body)))),
+    );
+    const { env } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
+
+    await app.fetch(
+      adminRequest('/_admin/api/images/update', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'img-1', location: '  FAROE  ' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      env,
+      ctx,
+    );
+
+    expect(JSON.parse(String(doFetch.mock.calls[0][1]?.body))).toEqual({
+      id: 'img-1',
+      location: 'FAROE',
+    });
+  });
+
   it('rejects a non-string editable field', async () => {
     const doFetch = vi.fn(() => Response.json({}));
     const { env } = createEnv(doFetch, { ACCESS_BYPASS_DEV: 'true' });
@@ -370,6 +382,102 @@ describe('upload validation', () => {
     );
 
     expect(response.status).toBe(413);
+    expect(bucket.putKeys).toEqual([]);
+  });
+});
+
+describe('security headers', () => {
+  const securityHeaderNames = [
+    'Strict-Transport-Security',
+    'X-Content-Type-Options',
+    'Referrer-Policy',
+    'Permissions-Policy',
+  ];
+  const expectSecurityHeaders = (response: Response) => {
+    for (const name of securityHeaderNames) expect(response.headers.get(name), name).toBeTruthy();
+  };
+
+  it('are set on an unknown path 404', async () => {
+    const response = await app.fetch(new Request(`${ORIGIN}/nope`), createEnv().env, ctx);
+
+    expect(response.status).toBe(404);
+    expectSecurityHeaders(response);
+  });
+
+  it('are set on the HTTPS redirect', async () => {
+    const response = await app.fetch(new Request('http://gallery.test/'), createEnv().env, ctx);
+
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('https://gallery.test/');
+    expectSecurityHeaders(response);
+  });
+
+  it('are set on a 304 revalidation', async () => {
+    const w = indexWorld();
+    await w.seed('h1');
+
+    const response = await w.run('/media/h1', { headers: { 'if-none-match': '"e"' } });
+
+    expect(response.status).toBe(304);
+    expectSecurityHeaders(response);
+  });
+});
+
+describe('admin responses', () => {
+  it('are never cached', async () => {
+    const { env } = createEnv(undefined, { ACCESS_BYPASS_DEV: 'true' });
+
+    const response = await app.fetch(adminRequest('/_admin/ping'), env, ctx);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+});
+
+describe('index outage', () => {
+  const downEnv = () =>
+    createEnv(() => new Response('down', { status: 500 }), { ACCESS_BYPASS_DEV: 'true' }).env;
+
+  it('answers admin stats with 503', async () => {
+    const response = await app.fetch(adminRequest('/_admin/api/stats'), downEnv(), ctx);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Index unavailable' });
+  });
+
+  it('answers a metadata update with 503', async () => {
+    const response = await app.fetch(
+      adminRequest('/_admin/api/images/update', {
+        method: 'POST',
+        body: JSON.stringify({ id: 'img-1', location: 'FAROE' }),
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      downEnv(),
+      ctx,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: 'Index unavailable' });
+  });
+
+  it('answers the photo list with an uncacheable 503', async () => {
+    const response = await app.fetch(new Request(`${ORIGIN}/api/images?limit=200`), downEnv(), ctx);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+});
+
+describe('upload metadata limits', () => {
+  it('rejects an over-long field before writing to R2', async () => {
+    const { env, bucket } = createEnv(recordingIndex().stubFetch, { ACCESS_BYPASS_DEV: 'true' });
+
+    const response = await app.fetch(uploadRequest({ location: 'x'.repeat(201) }), env, ctx);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'location must be a string of at most 200 characters',
+    });
     expect(bucket.putKeys).toEqual([]);
   });
 });

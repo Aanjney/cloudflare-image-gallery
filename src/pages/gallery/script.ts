@@ -1,70 +1,93 @@
+import { GALLERY_FIRST_PAGE_PATH } from '../../domain/contract';
 import {
   GALLERY_GRID_DEFAULT_VARIANT,
   GALLERY_GRID_VARIANTS,
-  GALLERY_FIRST_PAGE_PATH,
-} from '../domain/imageVariants';
+  buildBrowserImageUrlHelper,
+} from '../../domain/imageVariants';
 import {
-  emitBrowserEscHelper,
+  emitBrowserByIdHelper,
   emitBrowserFetchHelper,
-  emitBrowserImageUrlHelpers,
   emitBrowserPageWalker,
-  emitThemeToggle,
   wrapClientIife,
-} from './buildClientScript';
+} from '../shared/script';
+import { emitThemeToggle } from '../shared/theme';
+import { CLS, CONTACT_EMAIL, ICON, ID } from './markup';
+import { PLACEHOLDER_FADE_MS, THEME_COLORS, TILE_SIZES } from './styles';
+
+const CAROUSEL_DETAILS = [
+  ['cameraBody', ICON.photo_camera],
+  ['filmStock', ICON.camera_roll],
+  ['location', ICON.location_on],
+  ['year', ICON.calendar_today],
+];
 
 export function buildGalleryScript(): string {
-  const gridDefaultVariant = JSON.stringify(GALLERY_GRID_DEFAULT_VARIANT);
-  const gridVariants = JSON.stringify(GALLERY_GRID_VARIANTS);
+  return wrapClientIife(`${emitBrowserByIdHelper()}
+${buildBrowserImageUrlHelper()}
+  var ESC_CHARS = /[&<>"']/g;
+  var ESC_ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function esc(s) {
+    return String(s).replace(ESC_CHARS, function(ch) { return ESC_ENTITIES[ch]; });
+  }
+  function imageSrcset(id, variants) {
+    return variants.map(function(variant) {
+      return imageUrl(id, variant) + ' ' + variant.width + 'w';
+    }).join(', ');
+  }
+${emitBrowserFetchHelper()}
+${emitBrowserPageWalker()}
+${emitThemeToggle(THEME_COLORS)}
 
-  return wrapClientIife(`  /* ── Theme toggle ── */
-${emitThemeToggle()}
+  var grid = byId('${ID.grid}');
+  var carousel = byId('${ID.carousel}');
+  var cImg = byId('${ID.carouselImg}');
+  var cDetails = byId('${ID.carouselDetails}');
+  var cCounter = byId('${ID.carouselCounter}');
+  var prevBtn = document.querySelector('.${CLS.carouselPrev}');
+  var nextBtn = document.querySelector('.${CLS.carouselNext}');
+  var closeBtn = document.querySelector('.${CLS.carouselClose}');
+  var emailToast = byId('${ID.emailToast}');
+  var contactBtn = byId('${ID.contactBtn}');
+  var copyEmailBtn = byId('${ID.copyEmail}');
+  var copyLabel = byId('${ID.copyLabel}');
 
-  var grid = document.getElementById('grid');
-  var carousel = document.getElementById('carousel');
-  var cImg = document.getElementById('carouselImg');
-  var cDetails = document.getElementById('carouselDetails');
-  var cCounter = document.getElementById('carouselCounter');
-  var prevBtn = document.querySelector('.carousel-prev');
-  var nextBtn = document.querySelector('.carousel-next');
-  var closeBtn = document.querySelector('.carousel-close');
+  var GRID_DEFAULT_VARIANT = ${JSON.stringify(GALLERY_GRID_DEFAULT_VARIANT)};
+  var GRID_VARIANTS = ${JSON.stringify(GALLERY_GRID_VARIANTS)};
+  var CONTACT_EMAIL = ${JSON.stringify(CONTACT_EMAIL)};
+  var CAROUSEL_DETAILS = ${JSON.stringify(CAROUSEL_DETAILS)};
+  var FIRST_SCREEN_TIMEOUT_MS = 4000;
 
   var allItems = [];
   var currentIndex = -1;
   var touchStartX = 0;
   var touchStartY = 0;
   var lastFocus = null;
-  var GRID_DEFAULT_VARIANT = ${gridDefaultVariant};
-  var GRID_VARIANTS = ${gridVariants};
   var tileImgs = {};
   /* null until the first page is laid out, then the count of first-screen images still loading. */
   var firstScreenLeft = null;
   var waitingTiles = [];
-  var FIRST_SCREEN_TIMEOUT_MS = 4000;
+  var imgCache = {};
+  var toastTimer = null;
 
-${emitBrowserEscHelper()}
-${emitBrowserImageUrlHelpers()}
-${emitBrowserFetchHelper()}
-${emitBrowserPageWalker()}
-
-  var setTileSrc = function(img, id) {
+  function setTileSrc(img, id) {
     img.src = imageUrl(id, GRID_DEFAULT_VARIANT);
     img.srcset = imageSrcset(id, GRID_VARIANTS);
-  };
+  }
 
   /* Offscreen tiles wait for the first screen, so on slow links they don't split its bandwidth. */
-  var releaseWaitingTiles = function() {
+  function releaseWaitingTiles() {
     firstScreenLeft = 0;
     while (waitingTiles.length) {
       var t = waitingTiles.shift();
       setTileSrc(t.img, t.id);
     }
-  };
-  var firstScreenSettled = function() {
+  }
+  function firstScreenSettled() {
     if (firstScreenLeft > 0 && --firstScreenLeft === 0) releaseWaitingTiles();
-  };
+  }
 
   /* .masonry uses CSS columns, which fill top to bottom, so measure what is on screen. */
-  var startTileLoads = function(tiles) {
+  function startTileLoads(tiles) {
     if (firstScreenLeft !== null) {
       for (var i = 0; i < tiles.length; i++) {
         if (firstScreenLeft > 0) waitingTiles.push(tiles[i]);
@@ -88,9 +111,9 @@ ${emitBrowserPageWalker()}
     }
     if (firstScreenLeft === 0) releaseWaitingTiles();
     else setTimeout(releaseWaitingTiles, FIRST_SCREEN_TIMEOUT_MS);
-  };
+  }
 
-  var renderItems = function(items) {
+  function renderItems(items) {
     var frag = document.createDocumentFragment();
     var tiles = [];
     for (var i = 0; i < items.length; i++) {
@@ -103,25 +126,23 @@ ${emitBrowserPageWalker()}
 
       var wrap = document.createElement('div');
       wrap.className = 'img-wrap';
-      if (item.width && item.height) {
-        wrap.style.aspectRatio = item.width + ' / ' + item.height;
-      }
+      wrap.style.aspectRatio = item.width && item.height ? item.width + ' / ' + item.height : '3 / 2';
 
       var ph = document.createElement('div');
       ph.className = 'ph';
-      ph.style.background = item.placeholder || 'var(--surface)';
+      if (item.placeholder) ph.style.background = item.placeholder;
       wrap.appendChild(ph);
 
       var img = document.createElement('img');
       img.loading = 'lazy';
       img.decoding = 'async';
       img.alt = item.alt || 'Film photograph';
-      img.sizes = '(max-width:420px) 96vw,(max-width:640px) 88vw,(max-width:900px) 50vw,(max-width:1200px) 36vw,28vw';
+      img.sizes = '${TILE_SIZES}';
       tiles.push({ el: el, img: img, id: item.id });
       (function(phEl, imgEl) {
         imgEl.addEventListener('load', function() {
           phEl.style.opacity = '0';
-          setTimeout(function(){ phEl.remove(); }, 400);
+          setTimeout(function(){ phEl.remove(); }, ${PLACEHOLDER_FADE_MS});
           imgEl.classList.add('loaded');
         });
       })(ph, img);
@@ -153,25 +174,24 @@ ${emitBrowserPageWalker()}
     }
     grid.appendChild(frag);
     startTileLoads(tiles);
-  };
+  }
 
-  var shuffle = function(arr) {
+  function shuffle(arr) {
     for (var i = arr.length - 1; i > 0; i--) {
       var j = Math.floor(Math.random() * (i + 1));
       var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
     }
     return arr;
-  };
+  }
 
-  /* The first URL matches the <link rel="preload"> in the page head. */
-  var messageEl = function(text) {
+  function messageEl(text) {
     var div = document.createElement('div');
     div.className = 'gallery-message';
     div.textContent = text;
     return div;
-  };
+  }
 
-  var fetchInitial = function() {
+  function fetchInitial() {
     var failed = false;
     var seenIds = {};
     forEachImagePage(${JSON.stringify(GALLERY_FIRST_PAGE_PATH)}, function(items) {
@@ -191,50 +211,38 @@ ${emitBrowserPageWalker()}
         grid.appendChild(messageEl(failed ? 'Photos didn\\'t load. Refresh the page to try again.' : 'No photos yet.'));
       }
     });
-  };
-
-  /* ── Carousel ── */
-  var imgCache = {};
+  }
 
   /* The carousel uses the grid variants, so on a phone it reuses the image its tile already loaded. */
-  var preloadImage = function(id) {
+  function preloadImage(id) {
     if (imgCache[id]) return imgCache[id];
     var img = new Image();
-    img.src = imageUrl(id, GRID_DEFAULT_VARIANT);
-    img.srcset = imageSrcset(id, GRID_VARIANTS);
+    setTileSrc(img, id);
     img.sizes = '90vw';
     imgCache[id] = img;
     return img;
-  };
+  }
 
-  var preloadNeighbors = function(idx) {
+  function preloadNeighbors(idx) {
     var offsets = [-2, -1, 1, 2];
     for (var o = 0; o < offsets.length; o++) {
       var ni = (idx + offsets[o] + allItems.length) % allItems.length;
       if (ni !== idx && allItems[ni]) preloadImage(allItems[ni].id);
     }
-  };
+  }
 
-  var updateMeta = function(idx) {
+  function updateMeta(idx) {
     var item = allItems[idx];
     var html = '';
-    if (item.cameraBody) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">photo_camera</span><span>' + esc(item.cameraBody) + '</span></div>';
-    }
-    if (item.filmStock) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">camera_roll</span><span>' + esc(item.filmStock) + '</span></div>';
-    }
-    if (item.location) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">location_on</span><span>' + esc(item.location) + '</span></div>';
-    }
-    if (item.year) {
-      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">calendar_today</span><span>' + esc(item.year) + '</span></div>';
-    }
+    CAROUSEL_DETAILS.forEach(function(d) {
+      if (!item[d[0]]) return;
+      html += '<div class="detail-item"><span class="material-symbols-outlined" aria-hidden="true">' + d[1] + '</span><span>' + esc(item[d[0]]) + '</span></div>';
+    });
     cDetails.innerHTML = html;
     cCounter.textContent = String(idx+1).padStart(2,'0') + ' / ' + String(allItems.length).padStart(2,'0');
-  };
+  }
 
-  var showCarouselIndex = function(idx) {
+  function showCarouselIndex(idx) {
     if (idx < 0 || idx >= allItems.length) return;
     currentIndex = idx;
     var item = allItems[idx];
@@ -245,7 +253,7 @@ ${emitBrowserPageWalker()}
     var pre = preloadImage(item.id);
     cImg.alt = item.alt || 'Film photograph';
 
-    var showFull = function() {
+    function showFull() {
       if (currentIndex !== idx) return;
       cImg.srcset = pre.srcset;
       cImg.sizes = pre.sizes;
@@ -253,7 +261,7 @@ ${emitBrowserPageWalker()}
       cImg.classList.remove('loading');
       carousel.removeAttribute('aria-busy');
       preloadNeighbors(idx);
-    };
+    }
 
     if (pre.complete && pre.naturalWidth > 0) {
       showFull();
@@ -266,31 +274,32 @@ ${emitBrowserPageWalker()}
       carousel.setAttribute('aria-busy', 'true');
       pre.decode().then(showFull, showFull);
     }
-  };
+  }
 
-  var openCarousel = function(id) {
+  function openCarousel(id) {
     var idx = -1;
     for (var i = 0; i < allItems.length; i++) { if (allItems[i].id === id) { idx = i; break; } }
     if (idx !== -1) {
       lastFocus = document.activeElement;
       showCarouselIndex(idx);
     }
-  };
+  }
 
-  var closeCarouselFn = function() {
+  function closeCarousel() {
     if (carousel.open) carousel.close();
     document.body.style.overflow = '';
-  };
+  }
+
+  initThemeToggle();
 
   carousel.addEventListener('close', function() {
     document.body.style.overflow = '';
     if (lastFocus && document.contains(lastFocus)) lastFocus.focus();
   });
-
   carousel.addEventListener('click', function(e) {
-    if (e.target === carousel || !e.target.closest('.carousel-content')) closeCarouselFn();
+    if (e.target === carousel || !e.target.closest('.${CLS.carouselContent}')) closeCarousel();
   });
-  closeBtn.addEventListener('click', function(e){ e.stopPropagation(); closeCarouselFn(); });
+  closeBtn.addEventListener('click', function(e){ e.stopPropagation(); closeCarousel(); });
   prevBtn.addEventListener('click', function(e){
     e.stopPropagation();
     showCarouselIndex((currentIndex - 1 + allItems.length) % allItems.length);
@@ -318,12 +327,6 @@ ${emitBrowserPageWalker()}
     }
   });
 
-  /* ── Contact toast ── */
-  var emailToast = document.getElementById('emailToast');
-  var contactBtn = document.getElementById('contactBtn');
-  var copyEmailBtn = document.getElementById('copyEmail');
-  var copyLabel = document.getElementById('copyLabel');
-  var toastTimer = null;
   contactBtn.addEventListener('click', function(){
     emailToast.classList.toggle('visible');
     if (emailToast.classList.contains('visible')) {
@@ -332,10 +335,10 @@ ${emitBrowserPageWalker()}
     }
   });
   copyEmailBtn.addEventListener('click', function(){
-    navigator.clipboard.writeText('aanjneygupta43@gmail.com').then(function(){
+    navigator.clipboard.writeText(CONTACT_EMAIL).then(function(){
       copyLabel.textContent = 'Copied';
       setTimeout(function(){ copyLabel.textContent = 'Copy'; }, 1500);
-    }).catch(function(){});
+    }).catch(function(){ prompt('Copy email:', CONTACT_EMAIL); });
   });
   document.addEventListener('click', function(e){
     if (!emailToast.contains(e.target) && e.target !== contactBtn) {

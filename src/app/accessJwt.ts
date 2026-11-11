@@ -1,4 +1,4 @@
-import { isRetryableStatus, retry, withTimeout } from './retry';
+import { RETRY_POLICIES, isRetryableStatus, retry } from './retry';
 
 type Jwk = JsonWebKey & { kid?: string };
 
@@ -11,7 +11,6 @@ const JWKS_TTL_MS = 60 * 60 * 1000;
 // During an Access certs outage, keep verifying with the last good keys for this long.
 const JWKS_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 const JWKS_REFETCH_COOLDOWN_MS = 30 * 1000;
-const JWKS_FETCH_TIMEOUT_MS = 3000;
 
 class JwksError extends Error {
   constructor(
@@ -22,15 +21,15 @@ class JwksError extends Error {
   }
 }
 
-export type AccessJwtConfig = {
+type AccessJwtConfig = {
   teamDomain: string;
   audience: string;
 };
 
-export type AccessJwtVerifyResult =
+type AccessJwtVerifyResult =
   { ok: true; payload: Record<string, unknown> } | { ok: false; reason: string };
 
-export const normalizeAccessIssuer = (teamDomain: string): string => {
+const normalizeAccessIssuer = (teamDomain: string): string => {
   const trimmed = teamDomain.trim().replace(/\/$/, '');
   if (trimmed.startsWith('https://')) return trimmed;
   if (trimmed.startsWith('http://')) return `https://${trimmed.slice('http://'.length)}`;
@@ -99,29 +98,24 @@ const loadJwks = (url: string, fetchFn: typeof fetch): Promise<Jwk[]> =>
   retry(
     async () => {
       const fetchedAt = Date.now();
-      // withTimeout also covers a fetch implementation that ignores the abort signal.
-      const data = await withTimeout(
-        (async () => {
-          const resp = await fetchFn(url, { signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS) });
-          if (!resp.ok) {
-            throw new JwksError(
-              `Access JWKS fetch failed with ${resp.status}`,
-              isRetryableStatus(resp.status),
-            );
-          }
-          return (await resp.json()) as Partial<Jwks> | null;
-        })(),
-        JWKS_FETCH_TIMEOUT_MS,
-        'Access JWKS fetch',
-      );
+      // The retry timeout also covers a fetch implementation that ignores the abort signal.
+      const resp = await fetchFn(url, {
+        signal: AbortSignal.timeout(RETRY_POLICIES.jwks.timeoutMs),
+      });
+      if (!resp.ok) {
+        throw new JwksError(
+          `Access JWKS fetch failed with ${resp.status}`,
+          isRetryableStatus(resp.status),
+        );
+      }
+      const data = (await resp.json()) as Partial<Jwks> | null;
       if (!isJwkList(data?.keys)) throw new JwksError('Malformed Access JWKS', false);
       jwksCache = { url, keys: data.keys, fetchedAt };
       return data.keys;
     },
     {
-      attempts: 3,
-      baseMs: 100,
-      capMs: 1000,
+      ...RETRY_POLICIES.jwks,
+      label: 'Access JWKS fetch',
       retryOn: (err) => !(err instanceof JwksError) || err.retryable,
     },
   );

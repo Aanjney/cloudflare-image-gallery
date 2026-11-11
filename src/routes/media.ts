@@ -1,20 +1,24 @@
-import { formatPref, getEdgeCache, putWhileIndexed } from '../app/cache';
+import { getEdgeCache, putWhileIndexed } from '../app/cache';
+import { PRIVATE_NO_STORE } from '../app/cacheControl';
 import {
-  PRIVATE_NO_STORE,
-  PUBLIC_IMAGE_CACHE,
   buildR2ImageResponse,
   buildTransformedImageResponse,
-  etagsMatch,
-  indexUnavailableResponse,
-  notFoundResponse,
-  notModifiedResponse,
+  NEGOTIATED_VARY,
+  notModifiedIfMatch,
   r2ObjectEtag,
 } from '../app/mediaResponse';
-import { retry, withTimeout } from '../app/retry';
-import { addSecurityHeaders } from '../app/security';
-import { getImageMeta, type GalleryApp } from '../app/worker';
-import { imageCacheKey, mediaCacheKey, snapVariant } from '../domain/imageVariants';
-import type { Env } from '../types';
+import { RETRY_POLICIES, retry } from '../app/retry';
+import { getImageMeta } from '../do/client';
+import { PUBLIC_PATHS } from '../domain/contract';
+import {
+  formatPref,
+  imageCacheKey,
+  mediaUrl,
+  snapVariant,
+  variantKey,
+} from '../domain/imageVariants';
+import type { Env, GalleryApp } from '../types';
+import { indexFailureResponse, notFoundResponse } from './errors';
 
 const TRAILING_SLASHES = /\/+$/;
 
@@ -22,54 +26,45 @@ const buildImageOrigin = (env: Env, key: string) =>
   env.R2_PUBLIC_HOST ? `https://${env.R2_PUBLIC_HOST.replace(TRAILING_SLASHES, '')}/${key}` : null;
 
 const numberParam = (raw: string | undefined): number | undefined => {
+  if (!raw) return undefined;
   const n = Number(raw);
-  return raw && n && Number.isFinite(n) ? n : undefined;
+  return Number.isFinite(n) ? n : undefined;
 };
 
 const RESIZE_TIMEOUT_MS = 15000;
 
 const getR2Object = (env: Env, key: string) =>
-  retry(() => withTimeout(env.IMAGES_BUCKET.get(key), 5000, 'R2 get'), {
-    attempts: 2,
-    baseMs: 100,
-    capMs: 1000,
-  });
+  retry(() => env.IMAGES_BUCKET.get(key), { ...RETRY_POLICIES.r2Read, label: 'R2 get' });
 
 const stillIndexed = (env: Env, id: string) => async () => (await getImageMeta(env, id)).ok;
 
 export const registerMediaRoutes = (app: GalleryApp) => {
-  app.get('/media/:id', async (c) => {
+  app.get(`${PUBLIC_PATHS.media}:id`, async (c) => {
     const cache = getEdgeCache();
     const id = c.req.param('id');
-    const cacheReq = new Request(mediaCacheKey(new URL(c.req.url).origin, id));
+    const cacheReq = new Request(mediaUrl(new URL(c.req.url).origin, id));
     const cached = await cache.match(cacheReq);
-    if (cached) {
-      const cachedEtag = cached.headers.get('ETag');
-      return cachedEtag && etagsMatch(c.req.header('if-none-match'), cachedEtag)
-        ? notModifiedResponse(cachedEtag, PUBLIC_IMAGE_CACHE)
-        : cached;
-    }
+    const ifNoneMatch = c.req.header('if-none-match');
+    if (cached) return notModifiedIfMatch(ifNoneMatch, cached.headers.get('ETag')) ?? cached;
 
     const found = await getImageMeta(c.env, id);
-    if (!found.ok) return found.notFound ? notFoundResponse() : indexUnavailableResponse();
+    if (!found.ok) return indexFailureResponse(found);
 
     const meta = found.data;
     const obj = await getR2Object(c.env, meta.key);
-    if (!obj || !obj.body) return notFoundResponse(true);
+    if (!obj || !obj.body) return notFoundResponse();
 
-    const etag = r2ObjectEtag(obj, meta);
-    if (etagsMatch(c.req.header('if-none-match'), etag)) {
-      return notModifiedResponse(etag, PUBLIC_IMAGE_CACHE);
-    }
+    const notModified = notModifiedIfMatch(ifNoneMatch, r2ObjectEtag(obj, meta));
+    if (notModified) return notModified;
 
-    const resp = addSecurityHeaders(buildR2ImageResponse(obj, meta));
+    const resp = buildR2ImageResponse(obj, meta);
     c.executionCtx.waitUntil(
       putWhileIndexed(cache, cacheReq, resp.clone(), stillIndexed(c.env, id)),
     );
     return resp;
   });
 
-  app.get('/img/:id', async (c) => {
+  app.get(`${PUBLIC_PATHS.img}:id`, async (c) => {
     const cache = getEdgeCache();
     const id = c.req.param('id');
     const { width, quality } = snapVariant(
@@ -81,44 +76,41 @@ export const registerMediaRoutes = (app: GalleryApp) => {
 
     const edgeKey = new Request(imageCacheKey(origin, { id, width, quality, format }));
     const cached = await cache.match(edgeKey);
+    const ifNoneMatch = c.req.header('if-none-match');
     if (cached) {
-      const cachedEtag = cached.headers.get('ETag');
-      return cachedEtag && etagsMatch(c.req.header('if-none-match'), cachedEtag)
-        ? notModifiedResponse(cachedEtag, PUBLIC_IMAGE_CACHE, { Vary: 'Accept' })
-        : cached;
+      return notModifiedIfMatch(ifNoneMatch, cached.headers.get('ETag'), NEGOTIATED_VARY) ?? cached;
     }
 
     const found = await getImageMeta(c.env, id);
-    if (!found.ok) return found.notFound ? notFoundResponse() : indexUnavailableResponse();
+    if (!found.ok) return indexFailureResponse(found);
     const meta = found.data;
 
     const effectiveWidth = width && Math.min(width, meta.width || width);
-    const imageOpts = { width: effectiveWidth, quality, format };
+    const rendered = variantKey({ id, width: effectiveWidth, quality, format });
 
-    const etag = `"v-${id}-${effectiveWidth || 'orig'}-${quality}-${format}"`;
-    if (etagsMatch(c.req.header('if-none-match'), etag)) {
-      return notModifiedResponse(etag, PUBLIC_IMAGE_CACHE, { Vary: 'Accept' });
-    }
+    const etag = `"v-${rendered}"`;
+    const notModified = notModifiedIfMatch(ifNoneMatch, etag, NEGOTIATED_VARY);
+    if (notModified) return notModified;
 
-    const resp = await fetch(buildImageOrigin(c.env, meta.key) || `${origin}/media/${id}`, {
+    const resp = await fetch(buildImageOrigin(c.env, meta.key) || mediaUrl(origin, id), {
       signal: AbortSignal.timeout(RESIZE_TIMEOUT_MS),
       cf: {
-        image: imageOpts,
+        image: { width: effectiveWidth, quality, format },
         cacheEverything: true,
         cacheTtl: 86400,
-        cacheKey: `img-${id}-w${effectiveWidth || 'orig'}-q${quality}-${format}`,
+        cacheKey: `img-${rendered}`,
       },
     }).catch(() => null);
 
     if (!resp?.ok) {
       const obj = await getR2Object(c.env, meta.key);
-      if (!obj?.body) return notFoundResponse(true);
-      const fallback = addSecurityHeaders(buildR2ImageResponse(obj, meta));
+      if (!obj?.body) return notFoundResponse();
+      const fallback = buildR2ImageResponse(obj, meta);
       fallback.headers.set('Cache-Control', PRIVATE_NO_STORE);
       return fallback;
     }
 
-    const final = addSecurityHeaders(buildTransformedImageResponse(resp, etag));
+    const final = buildTransformedImageResponse(resp, etag);
     c.executionCtx.waitUntil(
       putWhileIndexed(cache, edgeKey, final.clone(), stillIndexed(c.env, id)),
     );

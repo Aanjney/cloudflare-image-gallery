@@ -1,29 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
-  PRIVATE_NO_STORE,
-  PUBLIC_IMAGE_CACHE,
   buildR2ImageResponse,
   buildTransformedImageResponse,
-  notFoundResponse,
   r2ObjectEtag,
 } from '../src/app/mediaResponse';
 import { parseIdBody, parseImageUpdateBody } from '../src/app/parseRequest';
 
+const PUBLIC_IMAGE_CACHE = 'public, max-age=31536000, s-maxage=86400, immutable';
+
 describe('mediaResponse', () => {
-  it('returns 404 JSON without security headers by default', async () => {
-    const resp = notFoundResponse();
-    expect(resp.status).toBe(404);
-    expect(resp.headers.get('Cache-Control')).toBe(PRIVATE_NO_STORE);
-    expect(resp.headers.get('Strict-Transport-Security')).toBeNull();
-    await expect(resp.json()).resolves.toEqual({ error: 'Not found' });
-  });
-
-  it('adds security headers to secured not-found responses', () => {
-    const resp = notFoundResponse(true);
-    expect(resp.status).toBe(404);
-    expect(resp.headers.get('Strict-Transport-Security')).toContain('max-age=');
-  });
-
   it('builds immutable image cache headers for transformed responses', () => {
     const upstream = new Response('bytes', {
       headers: { 'Content-Type': 'image/webp' },

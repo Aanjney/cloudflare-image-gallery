@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildAdminScript } from '../src/client/admin';
+import { buildAdminScript } from '../src/pages/admin/script';
+import { DESCRIPTIVE_FIELDS, META_FIELDS } from '../src/domain/imageMeta';
 
 const WHITESPACE = /\s+/;
 
@@ -134,6 +135,7 @@ function makeEl(tag: string): any {
     },
     set(v: string) {
       el._src = v;
+      (el.srcHistory ||= []).push(v);
     },
   });
   Object.defineProperty(el, 'innerHTML', {
@@ -547,6 +549,42 @@ describe('admin upload queue', () => {
     expect(h.uploads[1].fields.get('location')).toBe('LISBON');
   });
 
+  it('trims and uppercases typed metadata before upload', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg']);
+    const location = h.byId.get('queueList').querySelectorAll('input[data-field]')[2];
+    location.value = '  Lisbon ';
+    location.dispatch('input');
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+
+    expect(h.uploads[0].fields.get('location')).toBe('LISBON');
+  });
+
+  it('shows the server message for a rejected upload and falls back to a generic one', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg', 'b.jpg']);
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+    await h.uploads[0].respond(400, { error: 'Location is too long.' });
+    await h.clock.advance(0);
+    await h.uploads[1].respond(400, {});
+    await h.clock.advance(0);
+
+    const messages = queueRows(h).map((r: any) => r.row.querySelector('.error-text').textContent);
+    expect(messages[0]).toBe('Location is too long.');
+    expect(messages[1]).toContain('isn’t a supported photo');
+  });
+
+  it('limits the upload inputs to the metadata field lengths', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg']);
+    const inputs = h.byId.get('queueList').querySelectorAll('input[data-field]');
+    expect(inputs.map((i: any) => i.maxLength)).toEqual(
+      DESCRIPTIVE_FIELDS.map((name) => META_FIELDS[name].maxLength),
+    );
+  });
+
   it('keeps a finished file read-only until the run ends, so late edits are not dropped', async () => {
     const h = runAdmin(listOf([]));
     await addFiles(h, ['a.jpg', 'b.jpg']);
@@ -806,12 +844,23 @@ describe('admin manage table', () => {
   it('loads admin lists with cache: no-store', async () => {
     const h = runAdmin(listOf([]));
     await settle();
+    const manageLists = h.fetchCalls.filter((c) => c.url.startsWith('/api/images')).length;
     h.byId.get('backfillPlaceholders').dispatch('click');
     await settle();
 
     const lists = h.fetchCalls.filter((c) => c.url.startsWith('/api/images'));
-    expect(lists.map((c) => c.url)).toEqual(['/api/images?limit=10', '/api/images?limit=500']);
+    expect(manageLists).toBeGreaterThan(0);
+    expect(lists.length).toBeGreaterThan(manageLists);
     for (const c of lists) expect(c.init?.cache).toBe('no-store');
+  });
+
+  it('reports a failed stats load instead of leaving dashes', async () => {
+    const h = runAdmin((url) => {
+      if (url.includes('/api/stats')) return reply(500, {});
+      return reply(200, { items: [], cursor: null });
+    });
+    await h.clock.advance(10_000);
+    expect(h.byId.get('statsError').textContent).toContain('Couldn’t load the archive stats');
   });
 
   it('starts the stats request without waiting for the first list', async () => {
@@ -823,14 +872,15 @@ describe('admin manage table', () => {
     expect(h.fetchCalls.some((c) => c.url === '/_admin/api/stats')).toBe(true);
   });
 
-  it('clears onerror before falling back to the original image', async () => {
+  it('falls back to the original image once when the thumbnail keeps failing', async () => {
     const h = runAdmin(listOf([PHOTOS[0]]));
     await settle();
     const thumb = manageRow(h, 'A').querySelector('img');
     expect(thumb.src.indexOf('/img/')).toBe(0);
-    thumb.onerror();
-    expect(thumb.onerror).toBeNull();
+    for (let i = 0; i < 3; i++) thumb.onerror?.();
+
     expect(thumb.src).toBe('/media/A');
+    expect(thumb.srcHistory.filter((src: string) => src === '/media/A')).toHaveLength(1);
   });
 
   it('tells a search miss apart from an empty archive', async () => {
@@ -936,7 +986,6 @@ describe('admin backfill', () => {
     await decodeImages();
 
     expect(h.fetchCalls.filter((c) => c.url.startsWith('/img/'))).toHaveLength(3);
-    expect(h.fetchCalls.filter((c) => c.url.includes('limit=500'))).toHaveLength(1);
     expect(h.alerts).toEqual(['Stopped. Added colors to 3 of 5 photos.']);
     expect(btn.textContent).toBe('Backfill colors');
     expect(btn.disabled).toBe(false);

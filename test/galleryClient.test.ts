@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  emitBrowserFetchHelper,
-  emitBrowserPageWalker,
-  emitThemeBootstrap,
-} from '../src/client/buildClientScript';
-import { buildGalleryScript } from '../src/client/gallery';
-import { buildAdminHTML } from '../src/html/admin';
-import { buildGalleryHTML } from '../src/html/gallery';
+import { buildAdminHTML } from '../src/pages/admin';
+import { buildGalleryHTML } from '../src/pages/gallery';
+import { buildGalleryScript } from '../src/pages/gallery/script';
+import { emitBrowserFetchHelper, emitBrowserPageWalker } from '../src/pages/shared/script';
+import { emitThemeBootstrap } from '../src/pages/shared/theme';
 
 type Listener = (ev: any) => void;
 
@@ -100,7 +97,10 @@ class FakeEl {
   }
 }
 
-function runGallery(fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) {
+function runGallery(
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>,
+  opts: { writeText?: (text: string) => Promise<void>; prompt?: (...args: unknown[]) => void } = {},
+) {
   const byId = new Map<string, FakeEl>();
   const bySelector = new Map<string, FakeEl>();
   const docListeners = new FakeEl('document');
@@ -129,6 +129,7 @@ function runGallery(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
     'navigator',
     'matchMedia',
     'innerHeight',
+    'prompt',
     script,
   )(
     document,
@@ -139,9 +140,10 @@ function runGallery(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
       preloads.push(img);
       return img;
     },
-    { clipboard: { writeText: () => Promise.resolve() } },
+    { clipboard: { writeText: opts.writeText ?? (() => Promise.resolve()) } },
     () => ({ matches: false }),
     VIEWPORT_HEIGHT,
+    opts.prompt,
   );
   const grid = document.getElementById('grid')!;
   return {
@@ -162,6 +164,7 @@ function runGallery(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
     },
     message: () => grid.children.find((c) => c.className === 'gallery-message')?.textContent,
     key: (key: string) => docListeners.dispatch('keydown', { key }),
+    byId: document.getElementById,
   };
 }
 
@@ -172,6 +175,25 @@ const page = (ids: string[], cursor: string | null) =>
 
 const ids = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => prefix + i);
 
+describe('tile layout before images load', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives a photo without stored dimensions a default shape instead of zero height', async () => {
+    const g = runGallery(
+      async () =>
+        new Response(JSON.stringify({ items: [{ id: 'x' }], cursor: null }), { status: 200 }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(g.tiles()[0].children[0].style.aspectRatio).toBe('3 / 2');
+  });
+});
+
 describe('gallery loader', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -181,9 +203,12 @@ describe('gallery loader', () => {
   });
 
   it('requests the preloaded first page URL', async () => {
+    const preloadHref = buildGalleryHTML('https://example.com/').match(
+      /<link rel="preload" href="([^"]+)" as="fetch"/,
+    )![1];
     const g = runGallery(async () => page(ids('a', 1), null));
     await vi.runAllTimersAsync();
-    expect(g.fetchMock.mock.calls[0][0]).toBe('/api/images?limit=200');
+    expect(g.fetchMock.mock.calls[0][0]).toBe(preloadHref);
   });
 
   it('renders the first page before later pages arrive', async () => {
@@ -238,7 +263,10 @@ describe('gallery loader', () => {
 
   it('times out a hung first page after 10 seconds per attempt', async () => {
     const g = runGallery(() => new Promise<Response>(() => {}));
-    await vi.advanceTimersByTimeAsync(9_000);
+    await vi.advanceTimersByTimeAsync(9_900);
+    expect(g.fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(g.fetchMock).toHaveBeenCalledTimes(2);
     expect(g.message()).toBeUndefined();
     await vi.runAllTimersAsync();
     expect(g.fetchMock).toHaveBeenCalledTimes(3);
@@ -363,6 +391,34 @@ describe('carousel first open', () => {
   });
 });
 
+describe('contact email copy', () => {
+  it('offers the address in a prompt when the clipboard write fails', async () => {
+    const prompt = vi.fn();
+    const g = runGallery(async () => page([], null), {
+      writeText: () => Promise.reject(new Error('NotAllowedError')),
+      prompt,
+    });
+    g.byId('copyEmail')!.dispatch('click');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(prompt).toHaveBeenCalledWith('Copy email:', 'aanjneygupta43@gmail.com');
+  });
+});
+
+describe('tile sizes', () => {
+  it('matches the masonry column count at every breakpoint', () => {
+    const html = buildGalleryHTML('https://example.com/');
+    const sizes = html.match(/img\.sizes = '([^']+)'/)![1].split(',');
+    const columns = [
+      ...html.matchAll(/@media\(min-width:(\d+)px\)\{\.masonry\{column-count:(\d+)\}\}/g),
+    ];
+    expect(columns.length).toBeGreaterThan(0);
+    for (const [, minWidth, count] of columns) {
+      expect(sizes).toContain(`(min-width:${minWidth}px) ${Math.ceil(100 / Number(count))}vw`);
+    }
+    expect(sizes[sizes.length - 1]).toBe('100vw');
+  });
+});
+
 describe('page walker', () => {
   const load = (fetchImpl: (url: string, init?: RequestInit) => Promise<Response>) =>
     new Function(
@@ -400,11 +456,13 @@ describe('theme bootstrap', () => {
     stored?: string | null;
     prefersLight?: boolean;
     storageThrows?: boolean;
+    initial?: 'dark' | 'light';
   }) => {
+    const initial = opts.initial ?? 'dark';
     const html = new FakeEl('html');
-    html.setAttribute('data-theme', 'dark');
+    html.setAttribute('data-theme', initial);
     const meta = new FakeEl('meta');
-    meta.setAttribute('content', colors.dark);
+    meta.setAttribute('content', colors[initial]);
     const script = emitThemeBootstrap(colors)
       .replace(/^<script>/, '')
       .replace(/<\/script>$/, '');
@@ -430,11 +488,14 @@ describe('theme bootstrap', () => {
   });
 
   it('follows a dark system preference when nothing is stored', () => {
-    expect(run({ prefersLight: false })).toEqual({ theme: 'dark', themeColor: '#000' });
+    expect(run({ prefersLight: false, initial: 'light' })).toEqual({
+      theme: 'dark',
+      themeColor: '#000',
+    });
   });
 
   it('lets a stored choice win over the system preference', () => {
-    expect(run({ stored: 'dark', prefersLight: true })).toEqual({
+    expect(run({ stored: 'dark', prefersLight: true, initial: 'light' })).toEqual({
       theme: 'dark',
       themeColor: '#000',
     });
@@ -450,7 +511,7 @@ describe('theme bootstrap', () => {
 
   it.each([
     ['gallery', buildGalleryHTML('https://example.com/')],
-    ['admin', buildAdminHTML()],
+    ['admin', buildAdminHTML('/_admin')],
   ])('%s page sets the theme in the head before any stylesheet', (_name, html) => {
     const bootstrap = html.indexOf("localStorage.getItem('theme')");
     expect(bootstrap).toBeGreaterThan(html.indexOf('name="theme-color"'));
