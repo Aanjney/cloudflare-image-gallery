@@ -52,7 +52,7 @@ export function buildGalleryBody(): string {
     <button type="button" id="contactBtn">Contact</button>
   </div>
   <div class="email-toast" id="emailToast">
-    <span class="email-toast-addr">aanjneygupta43@gmail.com</span>
+    <span class="email-toast-addr">aanjneygupta43@<wbr>gmail.com</span>
     <button class="email-toast-copy" type="button" id="copyEmail" aria-label="Copy email">
       <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
     </button>

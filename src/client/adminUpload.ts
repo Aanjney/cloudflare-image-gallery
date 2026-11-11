@@ -33,89 +33,104 @@ export function buildAdminUploadScript(): string {
     return hex;
   };
 
-  var renderQueue = function(){
-    queueList.innerHTML = '';
-    queueCountEl.textContent = String(queue.length);
-    if (!queue.length) {
-      var empty = document.createElement('div');
-      empty.className = 'empty-state';
-      empty.textContent = 'No photos queued yet. Drag photos above or choose files.';
-      queueList.appendChild(empty);
-      return;
+  var queueEmpty = document.createElement('div');
+  queueEmpty.className = 'empty-state';
+  queueEmpty.textContent = 'No photos queued yet. Drag photos above or choose files.';
+
+  var buildQueueRow = function(item){
+    var row = document.createElement('div');
+    row.className = 'queue-item';
+    var previewWrap = document.createElement('div');
+    previewWrap.className = 'queue-item-preview';
+    var img = document.createElement('img');
+    img.src = item.preview || '';
+    img.alt = item.file.name;
+    previewWrap.appendChild(img);
+    var fileLabel = document.createElement('div');
+    fileLabel.className = 'queue-item-file-label';
+    fileLabel.textContent = item.file.name;
+    previewWrap.appendChild(fileLabel);
+    row.appendChild(previewWrap);
+
+    var fieldsWrap = document.createElement('div');
+    fieldsWrap.className = 'queue-item-fields';
+    var grid = document.createElement('div');
+    grid.className = 'fields-grid';
+    var mkField = function(label, field, placeholder) {
+      var g = document.createElement('label');
+      g.className = 'field-group';
+      var l = document.createElement('span');
+      l.textContent = label;
+      g.appendChild(l);
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.placeholder = placeholder || '';
+      inp.value = item[field] || '';
+      inp.setAttribute('data-field', field);
+      inp.addEventListener('input', function(){ item[field] = inp.value; });
+      g.appendChild(inp);
+      return g;
+    };
+    grid.appendChild(mkField('Camera body', 'cameraBody', 'e.g. Leica M6'));
+    grid.appendChild(mkField('Film stock', 'filmStock', 'e.g. Kodak Portra 400'));
+    grid.appendChild(mkField('Location', 'location', 'e.g. Faroe Islands'));
+    grid.appendChild(mkField('Year', 'year', 'e.g. 2024'));
+    fieldsWrap.appendChild(grid);
+    var actions = document.createElement('div');
+    actions.className = 'queue-item-actions';
+    var badge = document.createElement('span');
+    badge.className = 'status-badge';
+    actions.appendChild(badge);
+    var removeBtn = document.createElement('button');
+    removeBtn.className = 'btn-danger-text';
+    removeBtn.type = 'button';
+    removeBtn.innerHTML = '<span aria-hidden="true" class="material-symbols-outlined">delete</span> Remove';
+    removeBtn.addEventListener('click', function(){
+      queue = queue.filter(function(q){ return q !== item; });
+      revokePreview(item);
+      if (uploading) updateProgress();
+      renderQueue();
+    });
+    actions.appendChild(removeBtn);
+    fieldsWrap.appendChild(actions);
+    row.appendChild(fieldsWrap);
+    return row;
+  };
+
+  var updateQueueRow = function(item){
+    var row = item.row;
+    /* buildUploadForm reads the fields when the upload starts, and Done rows leave at the end of the run. */
+    var locked = item.status === 'Uploading' || item.status === 'Done';
+    row.querySelectorAll('input').forEach(function(inp){ inp.readOnly = locked; });
+    var badge = row.querySelector('.status-badge');
+    var shown = !!item.status && item.status !== 'Queued';
+    badge.hidden = !shown;
+    badge.className = 'status-badge' + (item.status === 'Done' ? ' done' : '') + (isError(item) ? ' error' : '');
+    badge.textContent = shown ? item.status : '';
+    badge.title = item.message || '';
+    row.querySelector('.btn-danger-text').hidden = item.status === 'Uploading';
+    var oldErr = row.querySelector('.error-text');
+    if (oldErr) oldErr.remove();
+    if (item.message && isError(item)) {
+      var errText = document.createElement('div');
+      errText.className = 'error-text';
+      errText.textContent = item.message;
+      row.querySelector('.queue-item-fields').appendChild(errText);
     }
+  };
+
+  /* renderQueue patches existing rows instead of rebuilding them, so focus and the caret survive status changes. */
+  var renderQueue = function(){
+    queueCountEl.textContent = String(queue.length);
+    startUploadBtn.disabled = uploading || !queue.length;
+    queueList.querySelectorAll('.queue-item').forEach(function(row){
+      if (!queue.some(function(q){ return q.row === row; })) row.remove();
+    });
+    queueEmpty.remove();
+    if (!queue.length) queueList.appendChild(queueEmpty);
     queue.forEach(function(item){
-      var row = document.createElement('div');
-      row.className = 'queue-item';
-      var previewWrap = document.createElement('div');
-      previewWrap.className = 'queue-item-preview';
-      var img = document.createElement('img');
-      img.src = item.preview || '';
-      img.alt = item.file.name;
-      previewWrap.appendChild(img);
-      var fileLabel = document.createElement('div');
-      fileLabel.className = 'queue-item-file-label';
-      fileLabel.textContent = item.file.name;
-      previewWrap.appendChild(fileLabel);
-      row.appendChild(previewWrap);
-
-      var fieldsWrap = document.createElement('div');
-      fieldsWrap.className = 'queue-item-fields';
-      var grid = document.createElement('div');
-      grid.className = 'fields-grid';
-      var mkField = function(label, field, placeholder, val) {
-        var g = document.createElement('label');
-        g.className = 'field-group';
-        var l = document.createElement('span');
-        l.textContent = label;
-        g.appendChild(l);
-        var inp = document.createElement('input');
-        inp.type = 'text';
-        inp.placeholder = placeholder || '';
-        inp.value = val || '';
-        inp.setAttribute('data-field', field);
-        inp.addEventListener('input', function(){ item[field] = inp.value; });
-        g.appendChild(inp);
-        return g;
-      };
-      grid.appendChild(mkField('Camera body', 'cameraBody', 'e.g. Leica M6', item.cameraBody));
-      grid.appendChild(mkField('Film stock', 'filmStock', 'e.g. Kodak Portra 400', item.filmStock));
-      grid.appendChild(mkField('Location', 'location', 'e.g. Faroe Islands', item.location));
-      grid.appendChild(mkField('Year', 'year', 'e.g. 2024', item.year));
-      fieldsWrap.appendChild(grid);
-
-      var actions = document.createElement('div');
-      actions.className = 'queue-item-actions';
-      if (item.status && item.status !== 'Queued') {
-        var badge = document.createElement('span');
-        badge.className = 'status-badge';
-        if (item.status === 'Done') badge.classList.add('done');
-        if (isError(item)) badge.classList.add('error');
-        badge.textContent = item.status;
-        if (item.message) badge.title = item.message;
-        actions.appendChild(badge);
-      }
-      if (item.status !== 'Uploading') {
-        var removeBtn = document.createElement('button');
-        removeBtn.className = 'btn-danger-text';
-        removeBtn.type = 'button';
-        removeBtn.innerHTML = '<span aria-hidden="true" class="material-symbols-outlined">delete</span> Remove';
-        removeBtn.addEventListener('click', function(){
-          queue = queue.filter(function(q){ return q !== item; });
-          revokePreview(item);
-          if (uploading) updateProgress();
-          renderQueue();
-        });
-        actions.appendChild(removeBtn);
-      }
-      fieldsWrap.appendChild(actions);
-      if (item.message && isError(item)) {
-        var errText = document.createElement('div');
-        errText.className = 'error-text';
-        errText.textContent = item.message;
-        fieldsWrap.appendChild(errText);
-      }
-      row.appendChild(fieldsWrap);
-      queueList.appendChild(row);
+      if (!item.row) queueList.appendChild(item.row = buildQueueRow(item));
+      updateQueueRow(item);
     });
   };
 
@@ -281,7 +296,6 @@ export function buildAdminUploadScript(): string {
 
   var finishRun = function(){
     uploading = false;
-    startUploadBtn.disabled = false;
     uploadLabel.textContent = uploadErrors ? 'Completed with errors' : 'Complete';
     uploadStatus.className = 'upload-progress-status ' + (uploadErrors ? 'error' : 'done');
     uploadStatus.textContent = uploadErrors
@@ -324,7 +338,6 @@ export function buildAdminUploadScript(): string {
     queue.forEach(function(q){ if (isError(q)) { q.status = 'Queued'; q.message = ''; } });
     if (!queue.some(function(q){ return q.status === 'Queued'; })) return;
     uploading = true;
-    startUploadBtn.disabled = true;
     uploadDone = 0;
     uploadErrors = 0;
     uploadNext();

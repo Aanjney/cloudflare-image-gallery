@@ -36,7 +36,10 @@ body{
 .material-symbols-outlined{
   font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24;
   vertical-align:middle;
+  display:inline-block;width:1em;height:1em;line-height:1;overflow:hidden;
 }
+/* The icon stylesheet loads async; hide ligature text until it applies. */
+html:not(.icons-ready) .material-symbols-outlined{color:transparent}
 
 /* ── Navigation ── */
 .site-nav{
@@ -51,11 +54,11 @@ body{
 .brand{
   font-family:'Epilogue',sans-serif;font-size:0.875rem;font-weight:700;
   text-transform:uppercase;letter-spacing:0.2em;color:var(--text);text-decoration:none;
-  transition:color 0.4s;
+  transition:color 0.4s;padding:15px 0;margin:-15px 0;
 }
 .nav-actions{display:flex;align-items:center;gap:2rem}
 .theme-toggle,.github-link{
-  background:none;border:none;cursor:pointer;padding:0;
+  background:none;border:none;cursor:pointer;padding:12px;margin:-12px;
   color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
   display:inline-flex;align-items:center;
 }
@@ -88,6 +91,8 @@ body{
   column-count:1;column-gap:2rem;
   max-width:1800px;margin:0 auto;padding:0 2rem 6rem;
 }
+/* Keeps the footer below the fold until the first page renders, so it doesn't shift. */
+.masonry:empty{min-height:100vh}
 @media(min-width:768px){.masonry{column-count:2}}
 @media(min-width:1280px){.masonry{column-count:3}}
 .masonry-item{break-inside:avoid;margin-bottom:3rem;cursor:pointer}
@@ -121,12 +126,13 @@ body{
   position:fixed;inset:0;z-index:100;background:var(--carousel-bg);color:var(--text);
   border:0;padding:0;margin:0;width:100%;height:100%;max-width:none;max-height:none;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  overflow:hidden;transition:background 0.4s;
+  overflow:hidden;transition:background 0.4s;touch-action:pan-y pinch-zoom;
 }
 .carousel:not([open]){display:none}
 .carousel-nav-btn{
   position:absolute;top:50%;transform:translateY(-50%);z-index:110;
-  background:none;border:none;cursor:pointer;padding:1rem;
+  background:var(--nav-bg);border:none;border-radius:50%;cursor:pointer;padding:0.5rem;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   color:var(--text-dim);transition:color 0.15s ease-out;
 }
 .carousel-nav-btn .material-symbols-outlined{
@@ -137,7 +143,7 @@ body{
 .carousel-next{right:1rem}
 @media(min-width:768px){.carousel-prev{left:3rem}.carousel-next{right:3rem}}
 .carousel-close{
-  position:absolute;top:1.5rem;right:2rem;z-index:110;
+  position:absolute;top:1.5rem;right:2rem;z-index:110;padding:10px;margin:-10px;
   background:none;border:none;cursor:pointer;
   color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
 }
@@ -148,10 +154,18 @@ body{
 }
 .carousel-img-wrap{
   flex:1;display:flex;align-items:center;justify-content:center;
-  width:100%;overflow:hidden;min-height:0;
+  width:100%;overflow:hidden;min-height:0;position:relative;
 }
 .carousel-img-wrap img{max-width:100%;max-height:70vh;object-fit:contain;display:block;transition:opacity 0.2s ease}
 .carousel-img-wrap img.loading{opacity:0.4}
+.carousel[aria-busy="true"] .carousel-img-wrap::after{
+  content:'';position:absolute;top:50%;left:50%;width:2rem;height:2rem;margin:-1rem 0 0 -1rem;
+  border:2px solid var(--text-muted);border-top-color:var(--text);border-radius:50%;
+}
+@media(prefers-reduced-motion:no-preference){
+  .carousel[aria-busy="true"] .carousel-img-wrap::after{animation:spin 0.8s linear infinite}
+}
+@keyframes spin{to{transform:rotate(360deg)}}
 .carousel-meta{margin-top:2rem;text-align:center;width:100%}
 .carousel-details{
   display:flex;flex-wrap:wrap;justify-content:center;align-items:center;
@@ -186,7 +200,7 @@ body{
   font-family:'Epilogue',sans-serif;font-size:0.7rem;
   text-transform:uppercase;letter-spacing:0.2em;font-weight:700;
   color:var(--text-dim);text-decoration:none;background:none;border:none;cursor:pointer;
-  transition:color 0.15s ease-out;text-underline-offset:0.5rem;padding:0;
+  transition:color 0.15s ease-out;text-underline-offset:0.5rem;padding:16px 0;margin:-16px 0;
 }
 .footer-copyright{
   font-family:'Inter',sans-serif;font-size:0.6rem;
@@ -214,11 +228,11 @@ body{
 }
 .email-toast-addr{
   font-family:'Inter',sans-serif;font-size:0.875rem;font-weight:500;
-  color:var(--text);letter-spacing:0.02em;user-select:all;overflow-wrap:anywhere;
+  color:var(--text);letter-spacing:0.02em;user-select:all;
 }
 .email-toast-copy{
   background:none;border:none;cursor:pointer;color:var(--text-dim);
-  transition:color 0.15s ease-out;padding:0;font-size:0;line-height:1;
+  transition:color 0.15s ease-out;padding:13px;margin:-13px;font-size:0;line-height:1;
 }
 .email-toast-copy .material-symbols-outlined{font-size:18px}
 .email-toast-label{

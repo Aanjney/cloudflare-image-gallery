@@ -18,7 +18,7 @@ ${emitThemeBootstrap(THEME_COLORS)}
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@400;600;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@400;600;700;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_a_photo,cloud_upload,content_copy,dark_mode,delete,edit,grid_view,home,light_mode,menu,search&display=block" rel="stylesheet" />
 ${buildAdminStyles()}
 </head>
