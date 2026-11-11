@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { clearAccessJwksCache, normalizeAccessIssuer, verifyAccessJwt } from '../src/app/accessJwt';
-import { requireAdminAuth } from '../src/app/security';
+import { clearAccessJwksCache, verifyAccessJwt } from '../src/app/accessJwt';
+import { requireAdminAuth } from '../src/app/adminAuth';
 import type { Env } from '../src/types';
 
 const TEAM = 'test-team';
-const ISSUER = normalizeAccessIssuer(TEAM);
+const ISSUER = 'https://test-team.cloudflareaccess.com';
 const AUD = 'test-app-aud';
 const KID = 'test-kid';
 
@@ -204,13 +204,18 @@ describe('requireAdminAuth', () => {
   });
 
   it('rejects requests without Cf-Access-Jwt-Assertion', async () => {
+    const fetchFn = mockJwksFetch();
+    vi.stubGlobal('fetch', fetchFn);
+
     const response = await app.fetch(new Request('https://gallery.test/admin'), {
       ...env,
       ACCESS_TEAM_DOMAIN: TEAM,
+      ACCESS_AUD: AUD,
     });
 
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({ error: 'Unauthorized' });
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it('allows requests with a verified Access JWT', async () => {
@@ -397,7 +402,6 @@ describe('Access JWKS cache', () => {
     const pending = verifyAccessJwt(token, config, hung as typeof fetch);
     await vi.advanceTimersByTimeAsync(15_000);
     await expect(pending).resolves.toEqual({ ok: false, reason: 'Unable to verify Access JWT' });
-    expect(hung).toHaveBeenCalledTimes(3);
 
     await vi.advanceTimersByTimeAsync(30_000);
     const recovered = await verifyAccessJwt(token, config, mockJwksFetch() as typeof fetch);

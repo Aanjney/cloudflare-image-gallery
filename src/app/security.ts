@@ -1,68 +1,27 @@
-import type { Context, Next } from 'hono';
-import { verifyAccessJwt } from './accessJwt';
-import type { Env } from '../types';
+import type { MiddlewareHandler } from 'hono';
 
-export const addSecurityHeaders = (resp: Response) => {
-  const headers = new Headers(resp.headers);
-  headers.set('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Referrer-Policy', 'same-origin');
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  return new Response(resp.body, {
-    status: resp.status,
-    statusText: resp.statusText,
+const SECURITY_HEADERS = {
+  'Strict-Transport-Security': 'max-age=15552000; includeSubDomains',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'same-origin',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+export const securityHeaders: MiddlewareHandler = async (c, next) => {
+  await next();
+  // Responses from fetch and the Cache API have immutable headers, so copy them.
+  const headers = new Headers(c.res.headers);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+  c.res = new Response(c.res.body, {
+    status: c.res.status,
+    statusText: c.res.statusText,
     headers,
   });
 };
 
-export const requireAdminAuth = async (c: Context<{ Bindings: Env }>, next: Next) => {
-  if (c.env.ACCESS_BYPASS_DEV === 'true') {
-    await next();
-    return;
-  }
-
-  const teamDomain = c.env.ACCESS_TEAM_DOMAIN?.trim();
-  if (!teamDomain) {
-    return c.json(
-      {
-        error: 'Unauthorized',
-        message: 'Set ACCESS_TEAM_DOMAIN to your Cloudflare Access team domain.',
-      },
-      401,
-    );
-  }
-
-  const audience = c.env.ACCESS_AUD?.trim();
-  if (!audience) {
-    return c.json(
-      {
-        error: 'Unauthorized',
-        message: 'Set ACCESS_AUD to your Cloudflare Access application AUD tag.',
-      },
-      401,
-    );
-  }
-
-  const token = c.req.header('Cf-Access-Jwt-Assertion') ?? c.req.header('cf-access-jwt-assertion');
-  if (!token) {
-    return c.json(
-      {
-        error: 'Unauthorized',
-        message:
-          'Protect this route with Cloudflare Access or set ACCESS_BYPASS_DEV=true for local dev only.',
-      },
-      401,
-    );
-  }
-
-  const result = await verifyAccessJwt(token, {
-    teamDomain,
-    audience,
-  });
-
-  if (!result.ok) {
-    return c.json({ error: 'Unauthorized', message: result.reason }, 401);
-  }
-
-  await next();
+export const httpsRedirect: MiddlewareHandler = async (c, next) => {
+  const url = new URL(c.req.url);
+  if (url.protocol !== 'http:') return next();
+  url.protocol = 'https:';
+  return c.redirect(url.toString(), 301);
 };

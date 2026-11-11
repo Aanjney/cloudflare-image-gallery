@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { ImageIndex, ORDER_LIMIT } from '../src/do/ImageIndex';
-import type { Env, ImageMeta, ListResponse } from '../src/types';
+import { ImageIndex } from '../src/do/ImageIndex';
+import { LIST_LIMITS } from '../src/domain/contract';
+import type { ImageMeta } from '../src/domain/imageMeta';
+import type { Env, ListResponse } from '../src/types';
 import { FakeStorage } from './support/fakes';
 
 const createStub = () => {
@@ -74,7 +76,7 @@ describe('ImageIndex Durable Object', () => {
       const { inst, storage } = createStub();
       await storage.put(
         'order',
-        Array.from({ length: ORDER_LIMIT }, (_, i) => `id-${i}`),
+        Array.from({ length: LIST_LIMITS.maxPhotos }, (_, i) => `id-${i}`),
       );
 
       const r = await add(inst, { id: 'new-id' });
@@ -84,7 +86,10 @@ describe('ImageIndex Durable Object', () => {
 
     it('allows re-adding an existing id when at capacity', async () => {
       const { inst, storage } = createStub();
-      const ids = ['existing', ...Array.from({ length: ORDER_LIMIT - 1 }, (_, i) => `id-${i}`)];
+      const ids = [
+        'existing',
+        ...Array.from({ length: LIST_LIMITS.maxPhotos - 1 }, (_, i) => `id-${i}`),
+      ];
       await storage.put('order', ids);
       await storage.put('meta:existing', meta({ id: 'existing', key: 'old-key' }));
 
@@ -93,7 +98,7 @@ describe('ImageIndex Durable Object', () => {
       expect(((await r.json()) as ImageMeta).key).toBe('new-key');
 
       const order = (await storage.get<string[]>('order')) ?? [];
-      expect(order).toHaveLength(ORDER_LIMIT);
+      expect(order).toHaveLength(LIST_LIMITS.maxPhotos);
       expect(order[0]).toBe('existing');
     });
   });
@@ -127,8 +132,8 @@ describe('ImageIndex Durable Object', () => {
       expect(await list(inst)).toEqual({ items: [], cursor: null });
     });
 
-    it('fits ORDER_LIMIT ids in one SQLite-backed storage value', async () => {
-      const order = Array.from({ length: ORDER_LIMIT }, () => crypto.randomUUID());
+    it('fits LIST_LIMITS.maxPhotos ids in one SQLite-backed storage value', async () => {
+      const order = Array.from({ length: LIST_LIMITS.maxPhotos }, () => crypto.randomUUID());
       const bytes = new TextEncoder().encode(JSON.stringify(order)).byteLength;
       // SQLite-backed Durable Objects cap a key plus value at 2 MB. Keep at least 2x headroom.
       expect(bytes).toBeLessThan(1024 * 1024);

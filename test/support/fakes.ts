@@ -1,6 +1,7 @@
 import app from '../../src/index';
 import { ImageIndex } from '../../src/do/ImageIndex';
-import type { Env, ImageMeta } from '../../src/types';
+import type { ImageMeta } from '../../src/domain/imageMeta';
+import type { Env } from '../../src/types';
 
 export const ORIGIN = 'https://gallery.test';
 
@@ -51,7 +52,6 @@ type IndexHook = (
   forward: () => Promise<Response>,
 ) => Promise<Response | void> | Response | void;
 
-/** A real ImageIndex behind the worker, with an in-memory R2 bucket. */
 export const indexWorld = () => {
   const storage = new FakeStorage();
   const index = new ImageIndex({ storage } as unknown as DurableObjectState, {} as Env);

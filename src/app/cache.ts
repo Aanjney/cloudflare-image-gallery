@@ -1,5 +1,3 @@
-import { FORMAT_VARIANTS, type OutputFormat } from '../domain/imageVariants';
-
 const noopCache: Cache = {
   match: async () => undefined,
   put: async () => {},
@@ -12,9 +10,6 @@ const noopCache: Cache = {
 
 export const getEdgeCache = (): Cache =>
   (globalThis as { caches?: { default?: Cache } }).caches?.default ?? noopCache;
-
-export const formatPref = (accept = ''): OutputFormat =>
-  FORMAT_VARIANTS.find((format) => accept.includes(`image/${format}`)) ?? 'jpeg';
 
 /**
  * Puts, then deletes the entry again if the image left the index meanwhile. A delete

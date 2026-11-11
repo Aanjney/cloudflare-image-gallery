@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import app from '../src/index';
-import type { Env, ImageMeta } from '../src/types';
+import type { ImageMeta } from '../src/domain/imageMeta';
+import type { Env } from '../src/types';
 import { FakeCache, ORIGIN, fakeNamespace } from './support/fakes';
 
 const ONE_YEAR = 31536000;

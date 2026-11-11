@@ -1,10 +1,5 @@
-import { addSecurityHeaders } from './security';
-import type { ImageMeta } from '../types';
-
-export const PRIVATE_NO_STORE = 'private, no-store';
-
-// Image URLs never change bytes; s-maxage bounds how long other colos serve a deleted photo.
-export const PUBLIC_IMAGE_CACHE = 'public, max-age=31536000, s-maxage=86400, immutable';
+import type { ImageMeta } from '../domain/imageMeta';
+import { PUBLIC_IMAGE_CACHE } from './cacheControl';
 
 type R2ImageObject = {
   body: ReadableStream | null;
@@ -15,38 +10,21 @@ type R2ImageObject = {
 
 const WEAK_ETAG_PREFIX = /^W\//;
 
-export const etagsMatch = (ifNoneMatch: string | undefined, etag: string | undefined): boolean => {
-  if (!etag || !ifNoneMatch) return false;
-  return ifNoneMatch.replace(WEAK_ETAG_PREFIX, '') === etag.replace(WEAK_ETAG_PREFIX, '');
+/** /img picks its format from Accept; /media originals never vary. */
+export const NEGOTIATED_VARY = 'Accept';
+
+/** A 304 when the client already holds `etag`, otherwise null. */
+export const notModifiedIfMatch = (
+  ifNoneMatch: string | undefined,
+  etag: string | null | undefined,
+  vary?: string,
+): Response | null => {
+  if (!etag || !ifNoneMatch) return null;
+  if (ifNoneMatch.replace(WEAK_ETAG_PREFIX, '') !== etag.replace(WEAK_ETAG_PREFIX, '')) return null;
+  const headers: Record<string, string> = { ETag: etag, 'Cache-Control': PUBLIC_IMAGE_CACHE };
+  if (vary) headers.Vary = vary;
+  return new Response(null, { status: 304, headers });
 };
-
-export const notFoundResponse = (secure = false): Response => {
-  const resp = Response.json(
-    { error: 'Not found' },
-    { status: 404, headers: { 'Cache-Control': PRIVATE_NO_STORE } },
-  );
-  return secure ? addSecurityHeaders(resp) : resp;
-};
-
-export const indexUnavailableResponse = (): Response =>
-  Response.json(
-    { error: 'Index unavailable' },
-    { status: 503, headers: { 'Cache-Control': PRIVATE_NO_STORE } },
-  );
-
-export const notModifiedResponse = (
-  etag: string,
-  cacheControl: string,
-  extraHeaders?: Record<string, string>,
-): Response =>
-  new Response(null, {
-    status: 304,
-    headers: {
-      ETag: etag,
-      'Cache-Control': cacheControl,
-      ...extraHeaders,
-    },
-  });
 
 export const r2ObjectEtag = (obj: R2ImageObject, meta: Pick<ImageMeta, 'id' | 'size'>): string =>
   obj.httpEtag || obj.etag || `"${meta.id}-${meta.size}"`;
@@ -67,6 +45,6 @@ export const buildTransformedImageResponse = (upstream: Response, etag: string):
   const headers = new Headers(upstream.headers);
   headers.set('ETag', etag);
   headers.set('Cache-Control', PUBLIC_IMAGE_CACHE);
-  headers.set('Vary', 'Accept');
+  headers.set('Vary', NEGOTIATED_VARY);
   return new Response(upstream.body, { headers, status: upstream.status });
 };
