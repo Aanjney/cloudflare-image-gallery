@@ -514,7 +514,8 @@ describe('admin upload queue', () => {
     expect(start.disabled).toBe(true);
     await finishUploads(h);
     expect(h.uploads.map((u) => u.name)).toEqual(['a.jpg', 'b.jpg']);
-    expect(start.disabled).toBe(false);
+    expect(queueRows(h)).toEqual([]);
+    expect(start.disabled).toBe(true);
   });
 
   it('counts files added mid-run in the progress total', async () => {
@@ -526,6 +527,78 @@ describe('admin upload queue', () => {
     await h.uploads[0].respond(200, { ok: true, image: { id: 'id-a' } });
 
     expect(h.byId.get('uploadCount').textContent).toBe('1 / 2');
+  });
+
+  it('makes the uploading file read-only so no typed metadata is dropped', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg', 'b.jpg']);
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+
+    const [a, b] = queueRows(h).map((r: any) => r.row.querySelectorAll('input'));
+    expect(a.map((i: any) => i.readOnly)).toEqual([true, true, true, true]);
+    expect(b.map((i: any) => i.readOnly)).toEqual([false, false, false, false]);
+
+    b[2].value = 'Lisbon';
+    b[2].dispatch('input');
+    await h.uploads[0].respond(200, { ok: true, image: { id: 'id-a' } });
+    await h.clock.advance(0);
+    expect(b.map((i: any) => i.readOnly)).toEqual([true, true, true, true]);
+    expect(h.uploads[1].fields.get('location')).toBe('LISBON');
+  });
+
+  it('keeps a finished file read-only until the run ends, so late edits are not dropped', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg', 'b.jpg']);
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+
+    const a = queueRows(h)[0].row.querySelectorAll('input');
+    await h.uploads[0].respond(200, { ok: true, image: { id: 'id-a' } });
+    await h.clock.advance(0);
+
+    expect(a.map((i: any) => i.readOnly)).toEqual([true, true, true, true]);
+  });
+
+  it("keeps focus on a waiting file's Remove button while another upload finishes", async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg', 'b.jpg', 'c.jpg']);
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+
+    const remove = queueRows(h)[2].row.querySelector('.btn-danger-text');
+    remove.focus();
+    await h.uploads[0].respond(200, { ok: true, image: { id: 'id-a' } });
+    await h.clock.advance(0);
+
+    expect(h.document.activeElement).toBe(remove);
+    expect(queueRows(h)[2].row.querySelectorAll('.btn-danger-text')).toContain(remove);
+  });
+
+  it('keeps focus in the next file while the current upload finishes', async () => {
+    const h = runAdmin(listOf([]));
+    await addFiles(h, ['a.jpg', 'b.jpg']);
+    h.byId.get('startUpload').dispatch('click');
+    await settle();
+
+    const location = queueRows(h)[1].row.querySelector('[data-field=location]');
+    location.focus();
+    await h.uploads[0].respond(200, { ok: true, image: { id: 'id-a' } });
+
+    expect(h.document.activeElement).toBe(location);
+    expect(h.byId.get('queueList').querySelectorAll('input')).toContain(location);
+  });
+
+  it('disables Upload to archive while the queue is empty', async () => {
+    const h = runAdmin(listOf([]));
+    const start = h.byId.get('startUpload');
+    expect(start.disabled).toBe(true);
+
+    await addFiles(h, ['a.jpg']);
+    expect(start.disabled).toBe(false);
+
+    h.byId.get('clearQueue').dispatch('click');
+    expect(start.disabled).toBe(true);
   });
 
   it('sends a per-file uploadId and reuses it when retrying a dropped connection', async () => {

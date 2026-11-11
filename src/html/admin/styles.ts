@@ -1,6 +1,7 @@
 export function buildAdminStyles(): string {
   return `<style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none !important}
 
 :root,[data-theme="dark"]{
   --bg:#131313;--surface:#1B1B1B;--surface-deep:#0e0e0e;
@@ -156,6 +157,7 @@ body{
   outline:none;transition:border-color 0.15s ease-out;resize:none;
 }
 .field-group input:focus,.field-group textarea:focus{border-color:var(--accent)}
+.field-group input:read-only{color:var(--text-dim)}
 .field-group input::placeholder,.field-group textarea::placeholder{color:var(--text-muted)}
 .queue-item-actions{display:flex;justify-content:flex-end;margin-top:1.5rem}
 
@@ -310,9 +312,12 @@ body{
   background:none;border:none;color:var(--text-heading);cursor:pointer;padding:0.5rem;
 }
 .mobile-toggle .material-symbols-outlined{font-size:24px}
+.sidebar-scrim{display:none}
 @media(max-width:960px){
-  .sidebar{transform:translateX(-100%);visibility:hidden}
+  .sidebar{transform:translateX(-100%);visibility:hidden;z-index:58}
   .sidebar.open{transform:none;visibility:visible}
+  .sidebar.open+.sidebar-scrim{display:block;position:fixed;inset:0;z-index:55;background:rgba(0,0,0,0.5)}
+  .drawer-open{overflow:hidden}
   .top-bar{left:0}
   .main-content{margin-left:0}
   .mobile-toggle{display:block}
@@ -322,12 +327,37 @@ body{
   .edit-form{grid-template-columns:1fr 1fr}
   .manage-footer{flex-direction:column;gap:1rem;text-align:center}
 }
+@media(max-width:960px),(pointer:coarse){
+  .field-group input,.field-group textarea,.search-box input{font-size:1rem}
+}
+@media(pointer:coarse){
+  .theme-toggle,.btn-icon{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px}
+  .mobile-toggle{padding:10px}
+  .btn-ghost,.btn-danger-text,.btn-save,.btn-cancel,.field-group input{min-height:44px}
+  .search-box{padding:0 1rem}
+  .search-box input{min-height:44px;flex:1;min-width:0}
+}
+@media(max-width:720px){
+  .manage-table thead{display:none}
+  .manage-table,.manage-table tbody{display:block}
+  .manage-table tbody tr{
+    display:grid;grid-template-columns:4rem auto 1fr;gap:0.5rem 1rem;padding:1rem;
+    grid-template-areas:"thumb loc loc" "thumb size date" "thumb act act";
+  }
+  .manage-table td{padding:0}
+  .manage-table td:nth-child(1){grid-area:thumb}
+  .manage-table td:nth-child(2){grid-area:loc}
+  .manage-table td:nth-child(3){grid-area:size}
+  .manage-table td:nth-child(4){grid-area:date}
+  .manage-table .manage-actions{grid-area:act;text-align:left}
+  .manage-table td[colspan]{grid-area:auto/1/auto/-1}
+  .manage-table tbody tr.edit-row{padding:0}
+}
 @media(max-width:600px){
   .stats-grid{grid-template-columns:1fr}
   .manage-toolbar{flex-direction:column;align-items:stretch}
   .main-content{padding:6rem 1rem 2rem}
   .edit-form{grid-template-columns:1fr}
-  .field-group input,.field-group textarea,.search-box input{font-size:1rem}
   .btn-primary-lg{padding:1.5rem 2rem}
 }
 @media(prefers-reduced-motion:no-preference){

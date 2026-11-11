@@ -34,8 +34,8 @@ ${emitThemeBootstrap(THEME_COLORS)}
 <link rel="preload" href="${GALLERY_FIRST_PAGE_PATH}" as="fetch" crossorigin />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@600;700;900&family=Inter:wght@400;500;700&display=swap" rel="stylesheet" />
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@200..400,0&display=block&icon_names=calendar_today,camera_roll,chevron_left,chevron_right,close,content_copy,dark_mode,light_mode,location_on,photo_camera" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Epilogue:wght@600;700;900&family=Inter:wght@400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@200..400,0&display=block&icon_names=calendar_today,camera_roll,chevron_left,chevron_right,close,content_copy,dark_mode,light_mode,location_on,photo_camera" rel="stylesheet" media="print" onload="this.media='all';document.documentElement.classList.add('icons-ready')" />
 <script type="application/ld+json">${structuredData}</script>
 ${buildGalleryStyles()}
 </head>

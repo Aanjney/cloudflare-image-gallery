@@ -1,6 +1,4 @@
 import {
-  CAROUSEL_DEFAULT_VARIANT,
-  CAROUSEL_VARIANTS,
   GALLERY_GRID_DEFAULT_VARIANT,
   GALLERY_GRID_VARIANTS,
   GALLERY_FIRST_PAGE_PATH,
@@ -17,8 +15,6 @@ import {
 export function buildGalleryScript(): string {
   const gridDefaultVariant = JSON.stringify(GALLERY_GRID_DEFAULT_VARIANT);
   const gridVariants = JSON.stringify(GALLERY_GRID_VARIANTS);
-  const carouselDefaultVariant = JSON.stringify(CAROUSEL_DEFAULT_VARIANT);
-  const carouselVariants = JSON.stringify(CAROUSEL_VARIANTS);
 
   return wrapClientIife(`  /* ── Theme toggle ── */
 ${emitThemeToggle()}
@@ -39,16 +35,64 @@ ${emitThemeToggle()}
   var lastFocus = null;
   var GRID_DEFAULT_VARIANT = ${gridDefaultVariant};
   var GRID_VARIANTS = ${gridVariants};
-  var CAROUSEL_DEFAULT_VARIANT = ${carouselDefaultVariant};
-  var CAROUSEL_VARIANTS = ${carouselVariants};
+  var tileImgs = {};
+  /* null until the first page is laid out, then the count of first-screen images still loading. */
+  var firstScreenLeft = null;
+  var waitingTiles = [];
+  var FIRST_SCREEN_TIMEOUT_MS = 4000;
 
 ${emitBrowserEscHelper()}
 ${emitBrowserImageUrlHelpers()}
 ${emitBrowserFetchHelper()}
 ${emitBrowserPageWalker()}
 
+  var setTileSrc = function(img, id) {
+    img.src = imageUrl(id, GRID_DEFAULT_VARIANT);
+    img.srcset = imageSrcset(id, GRID_VARIANTS);
+  };
+
+  /* Offscreen tiles wait for the first screen, so on slow links they don't split its bandwidth. */
+  var releaseWaitingTiles = function() {
+    firstScreenLeft = 0;
+    while (waitingTiles.length) {
+      var t = waitingTiles.shift();
+      setTileSrc(t.img, t.id);
+    }
+  };
+  var firstScreenSettled = function() {
+    if (firstScreenLeft > 0 && --firstScreenLeft === 0) releaseWaitingTiles();
+  };
+
+  /* .masonry uses CSS columns, which fill top to bottom, so measure what is on screen. */
+  var startTileLoads = function(tiles) {
+    if (firstScreenLeft !== null) {
+      for (var i = 0; i < tiles.length; i++) {
+        if (firstScreenLeft > 0) waitingTiles.push(tiles[i]);
+        else setTileSrc(tiles[i].img, tiles[i].id);
+      }
+      return;
+    }
+    firstScreenLeft = 0;
+    for (var j = 0; j < tiles.length; j++) {
+      var t = tiles[j];
+      if (t.el.getBoundingClientRect().top < innerHeight) {
+        firstScreenLeft++;
+        t.img.loading = 'eager';
+        t.img.fetchPriority = 'high';
+        t.img.addEventListener('load', firstScreenSettled);
+        t.img.addEventListener('error', firstScreenSettled);
+        setTileSrc(t.img, t.id);
+      } else {
+        waitingTiles.push(t);
+      }
+    }
+    if (firstScreenLeft === 0) releaseWaitingTiles();
+    else setTimeout(releaseWaitingTiles, FIRST_SCREEN_TIMEOUT_MS);
+  };
+
   var renderItems = function(items) {
     var frag = document.createDocumentFragment();
+    var tiles = [];
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       var el = document.createElement('div');
@@ -69,16 +113,11 @@ ${emitBrowserPageWalker()}
       wrap.appendChild(ph);
 
       var img = document.createElement('img');
-      var isAboveFold = (grid.childElementCount + frag.childElementCount) < 3;
-      img.loading = isAboveFold ? 'eager' : 'lazy';
+      img.loading = 'lazy';
       img.decoding = 'async';
       img.alt = item.alt || 'Film photograph';
-      img.src = imageUrl(item.id, GRID_DEFAULT_VARIANT);
-      img.srcset = imageSrcset(item.id, GRID_VARIANTS);
       img.sizes = '(max-width:420px) 96vw,(max-width:640px) 88vw,(max-width:900px) 50vw,(max-width:1200px) 36vw,28vw';
-      if (isAboveFold) {
-        img.fetchPriority = 'high';
-      }
+      tiles.push({ el: el, img: img, id: item.id });
       (function(phEl, imgEl) {
         imgEl.addEventListener('load', function() {
           phEl.style.opacity = '0';
@@ -87,6 +126,7 @@ ${emitBrowserPageWalker()}
         });
       })(ph, img);
 
+      tileImgs[item.id] = img;
       wrap.appendChild(img);
       el.appendChild(wrap);
 
@@ -112,6 +152,7 @@ ${emitBrowserPageWalker()}
       frag.appendChild(el);
     }
     grid.appendChild(frag);
+    startTileLoads(tiles);
   };
 
   var shuffle = function(arr) {
@@ -154,13 +195,13 @@ ${emitBrowserPageWalker()}
 
   /* ── Carousel ── */
   var imgCache = {};
-  var carouselUrl = function(id) { return imageUrl(id, CAROUSEL_DEFAULT_VARIANT); };
 
+  /* The carousel uses the grid variants, so on a phone it reuses the image its tile already loaded. */
   var preloadImage = function(id) {
     if (imgCache[id]) return imgCache[id];
     var img = new Image();
-    img.src = carouselUrl(id);
-    img.srcset = imageSrcset(id, CAROUSEL_VARIANTS);
+    img.src = imageUrl(id, GRID_DEFAULT_VARIANT);
+    img.srcset = imageSrcset(id, GRID_VARIANTS);
     img.sizes = '90vw';
     imgCache[id] = img;
     return img;
@@ -204,29 +245,27 @@ ${emitBrowserPageWalker()}
     var pre = preloadImage(item.id);
     cImg.alt = item.alt || 'Film photograph';
 
-    if (pre.complete && pre.naturalWidth > 0) {
-      cImg.classList.remove('loading');
-      cImg.src = pre.src;
+    var showFull = function() {
+      if (currentIndex !== idx) return;
       cImg.srcset = pre.srcset;
-      cImg.sizes = '90vw';
-    } else {
-      cImg.classList.add('loading');
-      pre.decode().then(function(){
-        if (currentIndex !== idx) return;
-        cImg.src = pre.src;
-        cImg.srcset = pre.srcset;
-        cImg.sizes = '90vw';
-        cImg.classList.remove('loading');
-      }).catch(function(){
-        if (currentIndex !== idx) return;
-        cImg.src = pre.src;
-        cImg.srcset = pre.srcset;
-        cImg.sizes = '90vw';
-        cImg.classList.remove('loading');
-      });
-    }
+      cImg.sizes = pre.sizes;
+      cImg.src = pre.src;
+      cImg.classList.remove('loading');
+      carousel.removeAttribute('aria-busy');
+      preloadNeighbors(idx);
+    };
 
-    preloadNeighbors(idx);
+    if (pre.complete && pre.naturalWidth > 0) {
+      showFull();
+    } else {
+      var tile = tileImgs[item.id];
+      cImg.srcset = '';
+      if (tile && tile.complete && tile.naturalWidth > 0) cImg.src = tile.currentSrc;
+      else cImg.removeAttribute('src');
+      cImg.classList.add('loading');
+      carousel.setAttribute('aria-busy', 'true');
+      pre.decode().then(showFull, showFull);
+    }
   };
 
   var openCarousel = function(id) {

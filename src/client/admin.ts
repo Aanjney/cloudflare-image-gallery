@@ -33,6 +33,7 @@ ${emitBrowserPageWalker()}
   var mobileToggle = byId('mobileToggle');
   var setSidebarOpen = function(open){
     sidebar.classList.toggle('open', open);
+    document.body.classList.toggle('drawer-open', open);
     mobileToggle.setAttribute('aria-expanded', String(open));
   };
   mobileToggle.addEventListener('click', function(){ setSidebarOpen(!sidebar.classList.contains('open')); });
@@ -43,6 +44,7 @@ ${emitBrowserPageWalker()}
   });
   var narrowViewport = window.matchMedia('(max-width: 960px)');
   var closeSidebar = function(){ setSidebarOpen(false); };
+  byId('sidebarScrim').addEventListener('click', closeSidebar);
   if (narrowViewport.addEventListener) narrowViewport.addEventListener('change', closeSidebar);
   else narrowViewport.addListener(closeSidebar);
 

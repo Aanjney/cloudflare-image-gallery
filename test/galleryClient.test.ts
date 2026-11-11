@@ -10,6 +10,10 @@ import { buildGalleryHTML } from '../src/html/gallery';
 
 type Listener = (ev: any) => void;
 
+/** Top edge of each grid tile, by DOM index. The default puts every tile on the first screen. */
+let tileTop: (index: number) => number = () => 0;
+const VIEWPORT_HEIGHT = 800;
+
 class FakeEl {
   attrs: Record<string, string> = {};
   children: FakeEl[] = [];
@@ -21,6 +25,8 @@ class FakeEl {
   innerHTML = '';
   src = '';
   srcset = '';
+  currentSrc = '';
+  fetchPriority = '';
   open = false;
   complete = false;
   naturalWidth = 0;
@@ -41,6 +47,10 @@ class FakeEl {
   }
   getAttribute(k: string) {
     return k in this.attrs ? this.attrs[k] : null;
+  }
+  removeAttribute(k: string) {
+    if (k === 'src') this.src = '';
+    delete this.attrs[k];
   }
   addEventListener(type: string, fn: Listener) {
     (this.listeners[type] ||= []).push(fn);
@@ -73,8 +83,13 @@ class FakeEl {
     return null;
   }
   focus() {}
+  getBoundingClientRect() {
+    const index = this.parent ? this.parent.children.indexOf(this) : 0;
+    return { top: tileTop(index) };
+  }
+  decoded = () => {};
   decode() {
-    return new Promise(() => {});
+    return new Promise<void>((resolve) => (this.decoded = resolve));
   }
   showModal() {
     this.open = true;
@@ -102,29 +117,49 @@ function runGallery(fetchImpl: (url: string, init?: RequestInit) => Promise<Resp
     activeElement: null,
   };
   const fetchMock = vi.fn(fetchImpl);
+  const preloads: FakeEl[] = [];
   const script = buildGalleryScript()
     .replace(/^<script>/, '')
     .replace(/<\/script>$/, '');
-  new Function('document', 'localStorage', 'fetch', 'Image', 'navigator', script)(
+  new Function(
+    'document',
+    'localStorage',
+    'fetch',
+    'Image',
+    'navigator',
+    'matchMedia',
+    'innerHeight',
+    script,
+  )(
     document,
     { getItem: () => null, setItem: () => {} },
     fetchMock,
     function () {
-      return new FakeEl('img');
+      const img = new FakeEl('img');
+      preloads.push(img);
+      return img;
     },
     { clipboard: { writeText: () => Promise.resolve() } },
+    () => ({ matches: false }),
+    VIEWPORT_HEIGHT,
   );
   const grid = document.getElementById('grid')!;
   return {
     fetchMock,
     grid,
+    preloads,
     carousel: document.getElementById('carousel')!,
+    carouselImg: document.getElementById('carouselImg')!,
     counter: () => document.getElementById('carouselCounter')!.textContent,
     tiles: () => grid.children.filter((c) => c.className === 'masonry-item'),
-    tileIds: () =>
-      grid.children
+    tileImg: (t: FakeEl) => t.children[0].children.find((c) => c.tag === 'img')!,
+    tileIds: () => {
+      const imgs = grid.children
         .filter((c) => c.className === 'masonry-item')
-        .map((t) => t.children[0].children.find((c) => c.tag === 'img')!.src.split('?')[0]),
+        .map((t) => t.children[0].children.find((c) => c.tag === 'img')!);
+      imgs.forEach((img) => img.dispatch('load'));
+      return imgs.map((img) => img.src.split('?')[0]);
+    },
     message: () => grid.children.find((c) => c.className === 'gallery-message')?.textContent,
     key: (key: string) => docListeners.dispatch('keydown', { key }),
   };
@@ -211,6 +246,47 @@ describe('gallery loader', () => {
   });
 });
 
+describe('grid image loading', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    tileTop = () => 0;
+  });
+
+  it('loads every tile on the first screen at once, then the rest', async () => {
+    // Three CSS columns fill top to bottom, so the first screen is not the first N tiles in DOM order.
+    const tops = [0, 700, 1400, 0, 700, 0];
+    tileTop = (i) => tops[i];
+    const g = runGallery(async () => page(ids('a', 6), null));
+    await vi.advanceTimersByTimeAsync(0);
+    const imgs = g.tiles().map(g.tileImg);
+    const visible = [0, 1, 3, 4, 5];
+
+    expect(visible.map((i) => imgs[i].src.startsWith('/img/'))).toEqual(visible.map(() => true));
+    expect(visible.map((i) => imgs[i].fetchPriority)).toEqual(visible.map(() => 'high'));
+    expect(imgs[2].src).toBe('');
+
+    for (const i of visible) imgs[i].dispatch('load');
+    expect(imgs[2].src.startsWith('/img/')).toBe(true);
+  });
+
+  it('stops holding back offscreen tiles when a first-screen image stalls', async () => {
+    tileTop = (i) => i * 1000;
+    const g = runGallery(async () => page(ids('a', 3), null));
+    await vi.advanceTimersByTimeAsync(0);
+    const [, ...rest] = g.tiles().map(g.tileImg);
+    expect(rest.map((img) => img.src)).toEqual(['', '']);
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(rest.every((img) => img.src.startsWith('/img/'))).toBe(true);
+  });
+});
+
 describe('carousel while pages append', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -241,6 +317,49 @@ describe('carousel while pages append', () => {
     g.key('ArrowRight');
     g.key('ArrowRight');
     expect(g.counter()).toBe('01 / 05');
+  });
+});
+
+describe('carousel first open', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const openFirstLoadedTile = async () => {
+    const g = runGallery(async () => page(ids('a', 6), null));
+    await vi.runAllTimersAsync();
+    const tile = g.tiles()[0];
+    const tileImg = g.tileImg(tile);
+    tileImg.complete = true;
+    tileImg.naturalWidth = 1200;
+    tileImg.currentSrc = tileImg.src;
+    tile.dispatch('click');
+    return { g, tileImg };
+  };
+
+  it('shows the loaded grid image with a busy cue until the full image decodes', async () => {
+    const { g, tileImg } = await openFirstLoadedTile();
+    expect(g.carouselImg.src).toBe(tileImg.currentSrc);
+    expect(g.carouselImg.classList.contains('loading')).toBe(true);
+    expect(g.carousel.getAttribute('aria-busy')).toBe('true');
+
+    g.preloads[0].decoded();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(g.carouselImg.srcset).toBe(g.preloads[0].srcset);
+    expect(g.carouselImg.classList.contains('loading')).toBe(false);
+    expect(g.carousel.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('preloads neighbours only after the current photo has loaded', async () => {
+    const { g } = await openFirstLoadedTile();
+    expect(g.preloads).toHaveLength(1);
+
+    g.preloads[0].decoded();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(g.preloads).toHaveLength(5);
   });
 });
 

@@ -19,6 +19,7 @@ export function buildAdminBody(): string {
     <a href="/" class="nav-item"><span aria-hidden="true" class="material-symbols-outlined">home</span><span>View gallery</span></a>
   </div>
 </aside>
+<div class="sidebar-scrim" id="sidebarScrim"></div>
 
 <header class="top-bar">
   <div></div>
@@ -75,7 +76,7 @@ export function buildAdminBody(): string {
       <div class="stat-card"><p class="stat-label">Average size</p><p class="stat-value" id="statAvgSize">&mdash;</p></div>
     </div>
     <div class="manage-toolbar">
-      <div class="search-box"><span aria-hidden="true" class="material-symbols-outlined">search</span><input id="searchInput" type="text" aria-label="Search archive" placeholder="Search archive…" /></div>
+      <label class="search-box"><span aria-hidden="true" class="material-symbols-outlined">search</span><input id="searchInput" type="text" aria-label="Search archive" placeholder="Search archive…" /></label>
       <div class="toolbar-actions">
         <span id="manageError" class="error-text" role="status"></span>
         <button id="backfillPlaceholders" class="btn-ghost" type="button">Backfill colors</button>
