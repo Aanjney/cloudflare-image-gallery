@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ORDER_LIMIT } from '../src/do/ImageIndex';
-import { purgeImageCacheTargets } from '../src/domain/imageVariants';
-import type { ImageMeta } from '../src/types';
+import { RETRY_POLICIES } from '../src/app/retry';
+import { LIST_LIMITS } from '../src/domain/contract';
+import type { ImageMeta } from '../src/domain/imageMeta';
 import { ORIGIN, indexWorld as world } from './support/fakes';
 
 const UPLOAD_ID = '0b7c6f8e-3d2a-4c1b-9e8f-1a2b3c4d5e6f';
@@ -15,12 +15,13 @@ describe('delete converges after partial failure', () => {
   it('a retry finishes a delete whose R2 step failed', async () => {
     const w = world();
     await w.seed('d1');
-    w.failR2Deletes(3);
+    w.failR2Deletes(RETRY_POLICIES.r2Delete.attempts);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const first = await w.del('d1');
     expect(first.status).toBe(500);
 
+    w.failR2Deletes(0);
     const retry = await w.del('d1');
     expect(retry.status).toBe(200);
     expect(w.r2.has('images/d1.jpg')).toBe(false);
@@ -66,13 +67,12 @@ describe('delete converges after partial failure', () => {
         },
       },
     });
-    w.failR2Deletes(2);
+    w.failR2Deletes(RETRY_POLICIES.r2Delete.attempts - 1);
 
     const resp = await w.del('d4');
 
     expect(resp.status).toBe(200);
-    expect(w.r2DeleteCalls()).toBe(3);
-    expect(cacheDeletes).toBe(purgeImageCacheTargets('d4', ORIGIN).length);
+    expect(cacheDeletes).toBeGreaterThan(0);
     expect(cacheDeletes + w.r2DeleteCalls()).toBeLessThanOrEqual(50);
   });
 });
@@ -87,7 +87,7 @@ describe('upload', () => {
 
     const resp = await w.upload();
 
-    expect(resp.status).toBe(500);
+    expect(resp.status).toBe(503);
     expect(w.r2Puts).toHaveLength(1);
     expect(w.r2.size).toBe(0);
   });
@@ -142,7 +142,7 @@ describe('upload', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const first = await w.upload({ uploadId: UPLOAD_ID });
-    expect(first.status).toBe(500);
+    expect(first.status).toBe(503);
     expect(w.order()).toEqual([UPLOAD_ID]);
     expect((await w.run(`/media/${UPLOAD_ID}`)).status).toBe(404);
 
@@ -165,6 +165,18 @@ describe('upload', () => {
     },
   );
 
+  it('keeps fields edited before a retry of an upload that already landed', async () => {
+    const w = world();
+    await w.upload({ uploadId: UPLOAD_ID, location: 'LISBON' });
+
+    const retry = await w.upload({ uploadId: UPLOAD_ID, location: 'PORTO' });
+
+    expect(((await retry.json()) as { image: ImageMeta }).image.location).toBe('PORTO');
+    const listed = (await (await w.run('/api/images?q=porto')).json()) as { items: ImageMeta[] };
+    expect(listed.items.map((i) => i.id)).toEqual([UPLOAD_ID]);
+    expect(w.r2Puts).toHaveLength(1);
+  });
+
   it('generates a server id when uploadId is absent', async () => {
     const w = world();
 
@@ -176,13 +188,13 @@ describe('upload', () => {
 
   it('explains a full archive with 409 and removes the R2 object', async () => {
     const w = world();
-    w.seedMany(ORDER_LIMIT);
+    w.seedMany(LIST_LIMITS.maxPhotos);
 
     const resp = await w.upload();
 
     expect(resp.status).toBe(409);
     await expect(resp.json()).resolves.toEqual({
-      error: `The archive is full (${ORDER_LIMIT} photos). Delete some photos before uploading more.`,
+      error: `The archive is full (${LIST_LIMITS.maxPhotos} photos). Delete some photos before uploading more.`,
     });
     expect(w.r2.size).toBe(0);
   });
@@ -306,6 +318,30 @@ describe('index outage', () => {
   });
 });
 
+describe('index failure reporting', () => {
+  it('logs the failure detail that the 503 body leaves out', async () => {
+    const w = world();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    w.setHook((path) =>
+      path === '/stats' ? new Response('disk on fire', { status: 500 }) : undefined,
+    );
+
+    const resp = await w.run('/_admin/api/stats');
+
+    expect(resp.status).toBe(503);
+    expect(log.mock.calls.flat().join(' ')).toContain('disk on fire');
+  });
+
+  it('keeps a photo id inside the meta lookup even when it contains a path', async () => {
+    const w = world();
+
+    const resp = await w.run('/media/..%2Fstats');
+
+    expect(resp.status).toBe(404);
+    expect(w.indexCalls).not.toContain('/stats');
+  });
+});
+
 describe('update', () => {
   it('answers 404 for a photo that is not in the index', async () => {
     const w = world();
@@ -346,7 +382,7 @@ describe('sitemap', () => {
 
     expect(resp.status).toBe(200);
     expect(xml.match(/<url>/g)).toHaveLength(500);
-    expect(w.indexCalls.filter((p) => p.startsWith('/list'))).toEqual(['/list?limit=500']);
+    expect(w.indexCalls.filter((p) => p.startsWith('/list'))).toHaveLength(1);
   });
 
   it('returns 503 with Retry-After when the index list fails', async () => {

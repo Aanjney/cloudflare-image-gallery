@@ -1,18 +1,36 @@
+import type { ThemeColors } from '../shared/theme';
+import { ICON_CSS, RESET_CSS } from '../shared/styles';
+
+export const THEME_COLORS: ThemeColors = { dark: '#000000', light: '#f5f3f0' };
+
+/** Ascending, because each later min-width query overrides the one before. */
+const GRID_COLUMNS = [
+  { minWidth: 768, columns: 2 },
+  { minWidth: 1280, columns: 3 },
+];
+
+export const TILE_SIZES = [...GRID_COLUMNS]
+  .reverse()
+  .map(({ minWidth, columns }) => `(min-width:${minWidth}px) ${Math.ceil(100 / columns)}vw`)
+  .concat('100vw')
+  .join(',');
+
+export const PLACEHOLDER_FADE_MS = 400;
+
 export function buildGalleryStyles(): string {
   return `<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+${RESET_CSS}
 @media(prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
 
-/* ── Theme tokens ── */
 :root,[data-theme="dark"]{
-  --bg:#000;--surface:#0a0a0a;--surface-high:#111;
+  --bg:${THEME_COLORS.dark};--surface:#0a0a0a;--surface-high:#111;
   --text:#fff;--text-dim:rgba(255,255,255,0.5);--text-muted:rgba(255,255,255,0.25);
   --nav-bg:rgba(0,0,0,0.80);--border:rgba(255,255,255,0.05);
   --carousel-bg:#131313;
   color-scheme:dark;
 }
 [data-theme="light"]{
-  --bg:#f5f3f0;--surface:#eae7e3;--surface-high:#ddd9d4;
+  --bg:${THEME_COLORS.light};--surface:#eae7e3;--surface-high:#ddd9d4;
   --text:#1a1a1a;--text-dim:rgba(0,0,0,0.6);--text-muted:rgba(0,0,0,0.2);
   --nav-bg:rgba(245,243,240,0.85);--border:rgba(0,0,0,0.08);
   --carousel-bg:#f5f3f0;
@@ -33,12 +51,11 @@ body{
   background:var(--text);color:var(--bg);z-index:200;font-size:0.875rem;text-decoration:none;
 }
 .skip-link:focus{top:1rem}
-.material-symbols-outlined{
-  font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24;
-  vertical-align:middle;
-}
+.material-symbols-outlined{display:inline-block;width:1em;height:1em;line-height:1;overflow:hidden}
+${ICON_CSS}
+/* The icon stylesheet loads async; hide ligature text until it applies. */
+html:not(.icons-ready) .material-symbols-outlined{color:transparent}
 
-/* ── Navigation ── */
 .site-nav{
   position:fixed;top:0;width:100%;z-index:50;
   display:flex;justify-content:space-between;align-items:center;
@@ -51,21 +68,17 @@ body{
 .brand{
   font-family:'Epilogue',sans-serif;font-size:0.875rem;font-weight:700;
   text-transform:uppercase;letter-spacing:0.2em;color:var(--text);text-decoration:none;
-  transition:color 0.4s;
+  transition:color 0.4s;padding:15px 0;margin:-15px 0;
 }
 .nav-actions{display:flex;align-items:center;gap:2rem}
 .theme-toggle,.github-link{
-  background:none;border:none;cursor:pointer;padding:0;
+  background:none;border:none;cursor:pointer;padding:12px;margin:-12px;
   color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
   display:inline-flex;align-items:center;
 }
 .theme-toggle .material-symbols-outlined{font-size:20px}
 .github-link svg{width:20px;height:20px;fill:currentColor}
-.icon-dark,.icon-light{display:none}
-[data-theme="dark"] .icon-light{display:inline}
-[data-theme="light"] .icon-dark{display:inline}
 
-/* ── Hero ── */
 .hero{
   padding:12rem 2rem 8rem;text-align:center;
   max-width:1800px;margin:0 auto;width:100%;
@@ -83,13 +96,13 @@ body{
   color:var(--text-dim);font-weight:600;transition:color 0.4s;
 }
 
-/* ── Masonry Grid ── */
 .masonry{
   column-count:1;column-gap:2rem;
   max-width:1800px;margin:0 auto;padding:0 2rem 6rem;
 }
-@media(min-width:768px){.masonry{column-count:2}}
-@media(min-width:1280px){.masonry{column-count:3}}
+/* Keeps the footer below the fold until the first page renders, so it doesn't shift. */
+.masonry:empty{min-height:100vh}
+${GRID_COLUMNS.map(({ minWidth, columns }) => `@media(min-width:${minWidth}px){.masonry{column-count:${columns}}}`).join('\n')}
 .masonry-item{break-inside:avoid;margin-bottom:3rem;cursor:pointer}
 .img-wrap{
   overflow:hidden;background:var(--surface);margin-bottom:1.5rem;position:relative;
@@ -97,7 +110,7 @@ body{
 }
 .img-wrap .ph{
   position:absolute;inset:0;filter:blur(20px);transform:scale(1.1);
-  transition:opacity 0.4s ease;z-index:1;
+  transition:opacity ${PLACEHOLDER_FADE_MS}ms ease;z-index:1;
 }
 .masonry-item img{
   width:100%;height:auto;display:block;object-fit:cover;
@@ -114,19 +127,18 @@ body{
   column-span:all;text-align:center;padding:2rem 0;
   font-family:'Inter',sans-serif;font-size:0.875rem;color:var(--text-dim);
 }
-#sentinel{height:2px}
 
-/* ── Carousel / Lightbox ── */
 .carousel{
   position:fixed;inset:0;z-index:100;background:var(--carousel-bg);color:var(--text);
   border:0;padding:0;margin:0;width:100%;height:100%;max-width:none;max-height:none;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
-  overflow:hidden;transition:background 0.4s;
+  overflow:hidden;transition:background 0.4s;touch-action:pan-y pinch-zoom;
 }
 .carousel:not([open]){display:none}
 .carousel-nav-btn{
   position:absolute;top:50%;transform:translateY(-50%);z-index:110;
-  background:none;border:none;cursor:pointer;padding:1rem;
+  background:var(--nav-bg);border:none;border-radius:50%;cursor:pointer;padding:0.5rem;
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
   color:var(--text-dim);transition:color 0.15s ease-out;
 }
 .carousel-nav-btn .material-symbols-outlined{
@@ -137,7 +149,7 @@ body{
 .carousel-next{right:1rem}
 @media(min-width:768px){.carousel-prev{left:3rem}.carousel-next{right:3rem}}
 .carousel-close{
-  position:absolute;top:1.5rem;right:2rem;z-index:110;
+  position:absolute;top:1.5rem;right:2rem;z-index:110;padding:10px;margin:-10px;
   background:none;border:none;cursor:pointer;
   color:var(--text-dim);transition:color 0.15s ease-out;font-size:0;line-height:1;
 }
@@ -148,10 +160,18 @@ body{
 }
 .carousel-img-wrap{
   flex:1;display:flex;align-items:center;justify-content:center;
-  width:100%;overflow:hidden;min-height:0;
+  width:100%;overflow:hidden;min-height:0;position:relative;
 }
 .carousel-img-wrap img{max-width:100%;max-height:70vh;object-fit:contain;display:block;transition:opacity 0.2s ease}
 .carousel-img-wrap img.loading{opacity:0.4}
+.carousel[aria-busy="true"] .carousel-img-wrap::after{
+  content:'';position:absolute;top:50%;left:50%;width:2rem;height:2rem;margin:-1rem 0 0 -1rem;
+  border:2px solid var(--text-muted);border-top-color:var(--text);border-radius:50%;
+}
+@media(prefers-reduced-motion:no-preference){
+  .carousel[aria-busy="true"] .carousel-img-wrap::after{animation:spin 0.8s linear infinite}
+}
+@keyframes spin{to{transform:rotate(360deg)}}
 .carousel-meta{margin-top:2rem;text-align:center;width:100%}
 .carousel-details{
   display:flex;flex-wrap:wrap;justify-content:center;align-items:center;
@@ -170,7 +190,6 @@ body{
 }
 .carousel-divider{width:2rem;height:1px;background:var(--text-muted);margin:0.75rem auto 0;transition:background 0.4s}
 
-/* ── Footer ── */
 .site-footer{
   width:100%;display:flex;flex-direction:column;align-items:center;gap:2.5rem;
   border-top:1px solid var(--border);padding:6rem 0 3rem;margin-top:auto;
@@ -186,7 +205,7 @@ body{
   font-family:'Epilogue',sans-serif;font-size:0.7rem;
   text-transform:uppercase;letter-spacing:0.2em;font-weight:700;
   color:var(--text-dim);text-decoration:none;background:none;border:none;cursor:pointer;
-  transition:color 0.15s ease-out;text-underline-offset:0.5rem;padding:0;
+  transition:color 0.15s ease-out;text-underline-offset:0.5rem;padding:16px 0;margin:-16px 0;
 }
 .footer-copyright{
   font-family:'Inter',sans-serif;font-size:0.6rem;
@@ -214,11 +233,11 @@ body{
 }
 .email-toast-addr{
   font-family:'Inter',sans-serif;font-size:0.875rem;font-weight:500;
-  color:var(--text);letter-spacing:0.02em;user-select:all;overflow-wrap:anywhere;
+  color:var(--text);letter-spacing:0.02em;user-select:all;
 }
 .email-toast-copy{
   background:none;border:none;cursor:pointer;color:var(--text-dim);
-  transition:color 0.15s ease-out;padding:0;font-size:0;line-height:1;
+  transition:color 0.15s ease-out;padding:13px;margin:-13px;font-size:0;line-height:1;
 }
 .email-toast-copy .material-symbols-outlined{font-size:18px}
 .email-toast-label{
@@ -226,7 +245,6 @@ body{
   color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;
 }
 
-/* ── Hover (only on devices with a real pointer) ── */
 @media(hover:hover){
   .theme-toggle:hover,.github-link:hover{color:var(--text)}
   .carousel-nav-btn:hover{color:var(--text)}

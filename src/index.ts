@@ -1,17 +1,18 @@
 import { Hono } from 'hono';
-import { registerAdminRewrite } from './app/adminPath';
+import { httpsRedirect, securityHeaders } from './app/security';
 import { registerAdminRoutes } from './routes/admin';
 import { registerGalleryRoutes } from './routes/gallery';
 import { registerMediaRoutes } from './routes/media';
 import { registerSiteMetaRoutes } from './routes/siteMeta';
-import type { Env } from './types';
+import type { GalleryApp } from './types';
 
-const app = new Hono<{ Bindings: Env }>();
+const app: GalleryApp = new Hono();
 
-registerAdminRewrite(app);
+app.use('*', securityHeaders);
+app.use('*', httpsRedirect);
+registerAdminRoutes(app);
 registerGalleryRoutes(app);
 registerMediaRoutes(app);
-registerAdminRoutes(app);
 registerSiteMetaRoutes(app);
 
 export default app;

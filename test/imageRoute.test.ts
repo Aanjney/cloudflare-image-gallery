@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import app from '../src/index';
-import type { Env, ImageMeta } from '../src/types';
+import type { ImageMeta } from '../src/domain/imageMeta';
+import type { Env } from '../src/types';
 import { FakeCache, fakeNamespace } from './support/fakes';
 
 const meta: ImageMeta = {
@@ -99,31 +100,33 @@ describe('/img transform parameter handling', () => {
   });
 
   it('serves a private R2 fallback when the resize fetch hangs', async () => {
-    const abort = new AbortController();
-    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
-    const timeoutSpy = vi
-      .spyOn(AbortSignal, 'timeout')
-      .mockImplementation((ms) => (ms === 15000 ? abort.signal : realTimeout(ms)));
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('', 'TimeoutError')), ms);
+      return controller.signal;
+    });
     fetchMock.mockImplementation(
       (_url: string, init: RequestInit) =>
         new Promise((_, reject) => {
-          init.signal?.addEventListener('abort', () =>
-            reject(new DOMException('', 'TimeoutError')),
-          );
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
         }),
     );
 
-    const responsePromise = run(
-      imgRequest('w=960&q=80&fmt=auto', { headers: { accept: 'image/avif' } }),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    abort.abort();
-    const response = await responsePromise;
-    timeoutSpy.mockRestore();
+    try {
+      const responsePromise = run(
+        imgRequest('w=960&q=80&fmt=auto', { headers: { accept: 'image/avif' } }),
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+      const response = await responsePromise;
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
-    expect(cache.putKeys).toEqual([]);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(cache.putKeys).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      timeoutSpy.mockRestore();
+    }
   });
 
   it('snaps w and q to allowed variants and resolves fmt from Accept', async () => {
@@ -133,7 +136,13 @@ describe('/img transform parameter handling', () => {
       }),
     );
 
-    expect(fetchedImageOptions()).toMatchObject({ width: 1600, quality: 85, format: 'avif' });
+    expect(fetchedImageOptions()).toMatchObject({ width: 1600, quality: 82, format: 'avif' });
+  });
+
+  it('snaps a zero width to the smallest variant instead of the original', async () => {
+    await run(imgRequest('w=0&q=70&fmt=auto', { headers: { accept: 'image/avif' } }));
+
+    expect(fetchedImageOptions()).toMatchObject({ width: 120, quality: 70 });
   });
 
   it('chooses the output format explicitly so the cache key and body agree', async () => {
@@ -144,8 +153,7 @@ describe('/img transform parameter handling', () => {
     );
 
     expect(fetchedImageOptions()).toMatchObject({ format: 'avif' });
-    const key = new URL(cache.putKeys[0]);
-    expect(key.searchParams.get('_accept')).toBe('avif');
+    expect(cache.putKeys[0]).toMatch(/-avif$/);
   });
 
   it('keeps explicit fmt=webp for admin thumbs regardless of Accept', async () => {
@@ -156,7 +164,6 @@ describe('/img transform parameter handling', () => {
     );
 
     expect(fetchedImageOptions()).toMatchObject({ width: 160, quality: 75, format: 'webp' });
-    const key = new URL(cache.putKeys[0]);
-    expect(key.searchParams.get('_accept')).toBe('webp');
+    expect(cache.putKeys[0]).toMatch(/-webp$/);
   });
 });

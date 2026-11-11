@@ -56,14 +56,19 @@ src/
   index.ts              Worker entry point and route registration
   types.ts              Shared TypeScript types
   favicon.ts            Favicon SVG
-  app/                  Worker helpers: Access JWT auth, security headers, cache,
-                        retries, media responses, request parsing, admin paths
-  client/               Browser scripts for the gallery and admin pages
-  domain/               Image variants, upload policy, delete flow, placeholder colors
+  app/                  Worker helpers: Access JWT verification and admin auth, security
+                        headers, cache and Cache-Control values, retries, media
+                        responses, request parsing
   do/ImageIndex.ts      Durable Object for image metadata storage
-  routes/               Hono route modules for gallery, media, admin, and site metadata
-  html/admin/           Admin page markup and styles
-  html/gallery/         Public gallery markup and styles
+  do/client.ts          Typed client for the index, with retries and failure kinds
+  domain/               URLs and limits shared with the browser (contract), image
+                        metadata fields, image variants, upload policy, placeholder colors
+  photos/lifecycle.ts   Upload, update and delete flows, including the cache purge
+  routes/               Hono route modules for gallery, media, admin, and site metadata,
+                        plus errors.ts, which turns index failures into HTTP responses
+  pages/gallery/        Public gallery markup, styles and browser script
+  pages/admin/          Admin markup, styles and browser scripts (upload and manage)
+  pages/shared/         Theme and browser helpers used by both pages
 assets/                 Screenshots used in this README
 test/
   adminClient.test.ts
@@ -161,22 +166,28 @@ Admin requests other than `GET` and `HEAD` must also send an `Origin` header equ
 `/img/:id` parameters:
 
 - `w`: width. Snaps to the nearest of 120, 160, 240, 320, 480, 720, 800, 960, 1200, 1600. It never exceeds the original width.
-- `q`: quality. Snaps to the nearest quality defined for the snapped width, between 70 and 85. Without `w`, the original size is served at quality 85.
+- `q`: quality. Snaps to the nearest quality defined for the snapped width, between 70 and 82. Without `w`, the original size is served at quality 85.
 - `fmt`: `webp` forces WebP. Anything else picks the format from the `Accept` header, preferring AVIF, then WebP, then JPEG.
 
 Uploads accept JPEG, PNG and WebP, one file per request, up to 50 MiB each. The admin UI labels this limit "50 MB".
+
+Text fields (name, alt, camera body, film stock, location, year) are trimmed on upload and on edit, and both have the same length limits: 255 characters for name, 1,000 for alt, 200 for camera body, film stock and location, and 32 for year. A field that is too long gets a 400 that names it.
+
+If the index is down, the admin stats, update, upload and list calls answer 503 `Index unavailable`. A delete that fails halfway answers 500, and retrying it finishes the job.
 
 ## Caching
 
 - Images from `/media/:id` and `/img/:id` are sent with `max-age` of 1 year and `s-maxage` of 1 day. Image URLs never change bytes.
 - The gallery's first list page, `/api/images?limit=200`, is cached for 60 s at the edge and 30 s in the browser. Other list pages are not edge-cached, and search results are `private, no-store`.
 - The gallery page `/` is `no-cache`, so browsers revalidate on every visit.
+- Admin responses are `private, no-store`.
+- Every response, including 304s, 404s and redirects, carries the security headers (HSTS, `nosniff`, referrer and permissions policies).
 
 ## Known limitations
 
 - Deleting a photo purges the edge cache only in the data center that handled the delete. Other data centers can serve their copy for up to 1 day. Browsers that already loaded it can keep it for a year.
 - The photo list has the same problem. Uploads, edits and deletes purge the cached first page only in the local data center, so other data centers can show a stale list for up to 60 seconds.
 - Search loads and scans every image's metadata on each request. That is fine for a personal gallery but does not scale.
-- The index holds at most 5,000 images (`ORDER_LIMIT`). Uploads past that fail with a 409.
+- The index holds at most 5,000 images (`LIST_LIMITS.maxPhotos` in `src/domain/contract.ts`). Uploads past that fail with a 409.
 
 [docs/STATE_MACHINES.md](docs/STATE_MACHINES.md) has the full list.

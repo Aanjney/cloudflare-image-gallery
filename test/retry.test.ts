@@ -1,22 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  TimeoutError,
-  backoffDelay,
-  isRetryableStatus,
-  retry,
-  withTimeout,
-} from '../src/app/retry';
-import { emitBrowserFetchHelper } from '../src/client/buildClientScript';
-
-describe('backoffDelay', () => {
-  it('grows exponentially up to the cap and scales by the jitter draw', () => {
-    expect(backoffDelay(0, 100, 1000, () => 1)).toBe(100);
-    expect(backoffDelay(3, 100, 1000, () => 1)).toBe(800);
-    expect(backoffDelay(10, 100, 1000, () => 1)).toBe(1000);
-    expect(backoffDelay(3, 100, 1000, () => 0.5)).toBe(400);
-    expect(backoffDelay(3, 100, 1000, () => 0)).toBe(0);
-  });
-});
+import { TimeoutError, isRetryableStatus, retry } from '../src/app/retry';
+import { emitBrowserFetchHelper } from '../src/pages/shared/script';
 
 describe('isRetryableStatus', () => {
   it('retries 429 and 5xx but not other 4xx', () => {
@@ -49,6 +33,18 @@ describe('retry', () => {
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([100, 200]);
   });
 
+  it('caps the backoff and scales it by the jitter draw', async () => {
+    const sleep = vi.fn(async (_ms: number) => {});
+    const fail = async () => {
+      throw new Error('down');
+    };
+
+    await expect(
+      retry(fail, { attempts: 6, baseMs: 100, capMs: 1000, sleep, random: () => 0.5 }),
+    ).rejects.toThrow('down');
+    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([50, 100, 200, 400, 500]);
+  });
+
   it('does not retry errors that retryOn rejects', async () => {
     const fn = vi.fn(async () => {
       throw new Error('permanent');
@@ -74,21 +70,29 @@ describe('retry', () => {
   });
 });
 
-describe('withTimeout', () => {
+describe('retry with a timeout', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('rejects with TimeoutError when the promise does not settle in time', async () => {
+  it('rejects with TimeoutError when an attempt does not settle in time', async () => {
     vi.useFakeTimers();
-    const pending = withTimeout(new Promise(() => {}), 50, 'jwks');
+    const pending = retry(() => new Promise(() => {}), {
+      attempts: 1,
+      baseMs: 1,
+      capMs: 1,
+      timeoutMs: 50,
+      label: 'jwks',
+    });
     vi.advanceTimersByTime(50);
     await expect(pending).rejects.toBeInstanceOf(TimeoutError);
     await expect(pending).rejects.toThrow('jwks timed out after 50ms');
   });
 
   it('passes through a value that arrives in time', async () => {
-    await expect(withTimeout(Promise.resolve(7), 50, 'x')).resolves.toBe(7);
+    await expect(
+      retry(async () => 7, { attempts: 1, baseMs: 1, capMs: 1, timeoutMs: 50 }),
+    ).resolves.toBe(7);
   });
 });
 

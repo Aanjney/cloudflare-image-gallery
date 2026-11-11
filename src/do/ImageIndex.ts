@@ -1,10 +1,19 @@
-import { Env, ImageMeta, ListResponse, StatsResponse } from '../types';
+import { LIST_LIMITS } from '../domain/contract';
+import { SEARCHABLE_FIELDS, readMetaFields, type ImageMeta } from '../domain/imageMeta';
+import type { Env, ListResponse, StatsResponse } from '../types';
+
+/** The index's HTTP surface. Writes are POST with a JSON body, reads are GET. */
+export const INDEX_PATHS = {
+  add: '/add',
+  update: '/update',
+  delete: '/delete',
+  list: '/list',
+  stats: '/stats',
+  meta: '/meta/',
+} as const;
 
 const ORDER_KEY = 'order';
 const META_PREFIX = 'meta:';
-// The order is one storage value. SQLite-backed objects allow 2 MB per key plus value,
-// and 5000 UUIDs serialize to about 190 KB.
-export const ORDER_LIMIT = 5000;
 const META_READ_BATCH = 128;
 // The cursor keeps the last few ids served, so a page resumes after the newest one that
 // still exists. The offset is only a fallback for when all of them were deleted.
@@ -49,30 +58,25 @@ export class ImageIndex {
   async fetch(request: Request) {
     const url = new URL(request.url);
 
-    if (request.method === 'POST' && url.pathname === '/add') {
-      return this.handleAdd(request);
+    if (request.method === 'POST') {
+      switch (url.pathname) {
+        case INDEX_PATHS.add:
+          return this.handleAdd(request);
+        case INDEX_PATHS.update:
+          return this.handleUpdate(request);
+        case INDEX_PATHS.delete:
+          return this.handleDelete(request);
+      }
     }
 
-    if (request.method === 'POST' && url.pathname === '/update') {
-      return this.handleUpdate(request);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/list') {
-      return this.handleList(url);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/stats') {
-      return this.handleStats();
-    }
-
-    if (request.method === 'GET' && url.pathname.startsWith('/meta/')) {
-      const [, , id] = url.pathname.split('/');
-      if (!id) return new Response('Missing id', { status: 400 });
-      return this.handleGet(id);
-    }
-
-    if (request.method === 'POST' && url.pathname === '/delete') {
-      return this.handleDelete(request);
+    if (request.method === 'GET') {
+      if (url.pathname === INDEX_PATHS.list) return this.handleList(url);
+      if (url.pathname === INDEX_PATHS.stats) return this.handleStats();
+      if (url.pathname.startsWith(INDEX_PATHS.meta)) {
+        const id = decodeURIComponent(url.pathname.slice(INDEX_PATHS.meta.length));
+        if (!id) return new Response('Missing id', { status: 400 });
+        return this.handleGet(id);
+      }
     }
 
     return new Response('Not found', { status: 404 });
@@ -85,27 +89,25 @@ export class ImageIndex {
     if (!payload.id || !payload.key || !payload.createdAt) {
       return new Response('Missing required fields', { status: 400 });
     }
+    const fields = readMetaFields((field) => payload[field]);
+    if (!fields.ok) return new Response(fields.error, { status: 400 });
 
     const meta: ImageMeta = {
       id: payload.id,
       key: payload.key,
       createdAt: payload.createdAt,
-      size: payload.size ?? 0,
-      contentType: payload.contentType ?? 'image/jpeg',
+      size: payload.size,
+      contentType: payload.contentType,
       width: payload.width,
       height: payload.height,
-      alt: payload.alt,
-      name: payload.name,
-      placeholder: payload.placeholder,
-      cameraBody: payload.cameraBody,
-      filmStock: payload.filmStock,
-      location: payload.location,
-      year: payload.year,
+      ...fields.fields,
     };
 
     const order = await this.getOrder();
     const isExisting = order.includes(meta.id);
-    if (!isExisting && order.length >= ORDER_LIMIT) {
+    // The order is one storage value. SQLite-backed objects allow 2 MB per key plus value,
+    // and 5000 UUIDs serialize to about 190 KB.
+    if (!isExisting && order.length >= LIST_LIMITS.maxPhotos) {
       return new Response('Index at capacity', { status: 409 });
     }
 
@@ -150,7 +152,11 @@ export class ImageIndex {
     const cursorParam = url.searchParams.get('cursor');
     const q = url.searchParams.get('q')?.toLowerCase().trim() || '';
 
-    const limit = Math.min(500, Math.max(1, limitParam ? Number(limitParam) || 20 : 20));
+    const { defaultPageSize, maxPageSize } = LIST_LIMITS;
+    const limit = Math.min(
+      maxPageSize,
+      Math.max(1, limitParam ? Number(limitParam) || defaultPageSize : defaultPageSize),
+    );
 
     const order = await this.getOrder();
 
@@ -190,18 +196,9 @@ export class ImageIndex {
     const existing = await this.state.storage.get<ImageMeta>(metaKey);
     if (!existing) return new Response('Not found', { status: 404 });
 
-    const updated: ImageMeta = {
-      ...existing,
-      alt: payload.alt ?? existing.alt,
-      name: payload.name ?? existing.name,
-      width: payload.width ?? existing.width,
-      height: payload.height ?? existing.height,
-      placeholder: payload.placeholder ?? existing.placeholder,
-      cameraBody: payload.cameraBody ?? existing.cameraBody,
-      filmStock: payload.filmStock ?? existing.filmStock,
-      location: payload.location ?? existing.location,
-      year: payload.year ?? existing.year,
-    };
+    const fields = readMetaFields((field) => payload[field]);
+    if (!fields.ok) return new Response(fields.error, { status: 400 });
+    const updated: ImageMeta = { ...existing, ...fields.fields };
 
     await this.state.storage.put(metaKey, updated);
     return Response.json(updated);
@@ -263,12 +260,7 @@ export class ImageIndex {
 
   private matchesQuery(m: ImageMeta, q: string): boolean {
     return (
-      (m.alt?.toLowerCase().includes(q) ?? false) ||
-      (m.name?.toLowerCase().includes(q) ?? false) ||
-      (m.location?.toLowerCase().includes(q) ?? false) ||
-      (m.cameraBody?.toLowerCase().includes(q) ?? false) ||
-      (m.filmStock?.toLowerCase().includes(q) ?? false) ||
-      (m.year?.toLowerCase().includes(q) ?? false) ||
+      SEARCHABLE_FIELDS.some((field) => m[field]?.toLowerCase().includes(q)) ||
       m.id.toLowerCase().includes(q)
     );
   }
